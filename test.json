@@ -1,0 +1,24 @@
+{
+    "source": "Twitter",
+    "tweet": {
+        "created_at": "Thu March 25 23:44 2021",
+        "client": "Web App",
+        "text": "I made up a joke that has so many layers I don't even get it. Wanna hear? Okay.\nDid you hear the joke about the unemployed robot? It doesn't make cents. Sad because it used to print currency, but it got de-commissioned.",
+        "user": {
+            "name": "Twitter Dev",
+            "screen_name": "TwitterDev",
+            "verified": true
+        },
+        "interaction": {
+            "likes": 573,
+            "retweets": 23,
+            "quoted": 3
+        }
+    }
+}
+
+
+
+
+
+
