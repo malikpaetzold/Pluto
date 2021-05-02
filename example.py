@@ -13,4 +13,4 @@ pl.show_image(img)
 
 pl.get_header(img)
 # pl.get_text(img)
-# pl.get_stats(img)
+pl.get_stats(img)

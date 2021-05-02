@@ -5,8 +5,8 @@
         "client": "Web App",
         "text": "I made up a joke that has so many layers I don't even get it. Wanna hear? Okay.\nDid you hear the joke about the unemployed robot? It doesn't make cents. Sad because it used to print currency, but it got de-commissioned.",
         "user": {
-            "name": "Twitter Dev",
-            "screen_name": "TwitterDev",
+            "name": "Dianna Cowern",
+            "screen_name": "thephysicsgirl",
             "verified": true
         },
         "interaction": {
@@ -17,8 +17,18 @@
     }
 }
 
+,
 
 
-
-
+{
+    "source": "News Article",
+    "article": {
+        "created": "[Published] 1 Day ago",
+        "organisation": "Fox News",
+        "headline": "Putin so upset over Biden's killer comments he moved 28,000 Russion troops to Ukraine border, report",
+        "subtitle": "Facing sagging popularity at home, Putin has returned to a 'hybrid war' with the US",
+        "author": "Jennifer Griffin",
+        "category": "Russia"
+    }
+}
 
