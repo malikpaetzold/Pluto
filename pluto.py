@@ -63,7 +63,7 @@ def sgmtn_header(image, reverse_output=False, reverse_only=False):
     new_array = cv2.resize(image, (IMG_SIZE, IMG_SIZE))
     image = new_array.reshape(-1, IMG_SIZE, IMG_SIZE, 3) 
     
-    model = tf.keras.models.load_model("D:/Codeing/Twitter_Segmentation/model_3")
+    model = tf.keras.models.load_model("C:/.../.../...") # Path to model
     prediction = model.predict(image)[0] * 255
     
     output_mask_blur = cv2.blur(prediction, (10, 10))
