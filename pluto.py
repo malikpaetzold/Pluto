@@ -2,8 +2,11 @@
 # v0.1
 
 import numpy as np
+import matplotlib.pyplot as plt
 import cv2
 import os
+
+# from tensorflow.python.ops.gen_array_ops import reverse
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 IMG_SIZE = 256
@@ -15,14 +18,13 @@ tesseract_path = ""
 
 def read_image(path, no_BGR_correction=False):
     image = cv2.imread(path)
-    if type(image) is None:
-        raise Exception("Image path is not valid, read object is of type None!")
+    if image is None:
+        raise AttributeError("Pluto ERROR in read_image() function: Image path is not valid, read object is of type None!")
     if no_BGR_correction: return image
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return image
 
 def show_image(image, BGR2RGB=False):
-    import matplotlib.pyplot as plt
     if BGR2RGB: image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     plt.imshow(image)
     plt.show()
@@ -210,3 +212,85 @@ def get_stats(image, already_segmented=False):
     lines = ocr_result.split("\n")
     print(lines)
     show_image(stats_subtracted)
+
+def mask_overlay(base, mask1, mask2=None):
+    black_img = np.zeros([256, 256]).astype(np.uint8)
+    og_img = model_input[0].astype(np.uint8)
+    over_img = (output_mask_rough0).astype(np.uint8)
+    cor_overlay_image = cv2.merge((over_img, black_img, black_img))
+    out = cv2.addWeighted(og_img, 0.5, cor_overlay_image, 1.0, 0)
+    over_img = (output_mask_rough1).astype(np.uint8)
+    cor_overlay_image = cv2.merge((black_img, black_img, over_img))
+    out = cv2.addWeighted(out, 0.5, cor_overlay_image, 1.0, 0)
+
+    plt.imshow(out)
+    plt.show()
+
+def display_masks(mask1, mask1_pp=None, mask2=None, mask2_pp=None):
+    try:
+        cv2.imshow("pred", mask1)
+    except Exception as e:
+        print("Pluto ERROR - In display_masks(), origininal error message: ", e)
+        quit()
+    cv2.imshow("mask", mask1_pp)
+    cv2.waitKey(0)
+    cv2.imshow("mask2", mask2)
+    cv2.imshow("mask", mask2_pp)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+def nyt_sgmt(input_image):
+    import tensorflow as tf
+    model_input = cv2.resize(input_image, (IMG_SIZE, IMG_SIZE)) # The model expects an image of size 256x256x3
+    model_input = model_input.reshape(-1, IMG_SIZE, IMG_SIZE, 3) # Tensorflow requires the dimensions to be (1, 256, 256, 3)
+    model0 = tf.keras.models.load_model("models/nyt_model_0") # load both models from the "models" folder
+    model1 = tf.keras.models.load_model("models/nyt_model_1")
+
+    prediction0 = model0.predict(model_input)[0] * 255  # The model returns its predictions in the dimension (1, 256, 256, 1) with values ranging from 0-1
+    prediction1 = model1.predict(model_input)[0] * 255  # But the desired output is (256, 256, 1) with values ranging from 0-255
+
+    output_mask_blur0 = cv2.blur(prediction0, (2, 2)) # Some post-processing on the segmentation mask
+    output_mask_rough0 = (output_mask_blur0 > 0.999).astype(np.uint8) * 255
+
+    output_mask_blur1 = cv2.blur(prediction1, (2, 2))
+    output_mask_rough1 = (output_mask_blur1 > 0.999).astype(np.uint8) * 255
+    
+    # display_masks(None)
+    
+    # mask_overlay(None)
+    
+    return output_mask_rough0, output_mask_rough1
+
+def mask_color(img, mask, reverse2=False):
+    dimensions = img.shape
+    output = np.zeros((dimensions[0], dimensions[1], 3)).astype(np.uint8)
+    if reverse2: reverse = np.zeros((dimensions[0], dimensions[1], 3)).astype(np.uint8)
+    for i in range(dimensions[0]):
+        for j in range(dimensions[1]):
+            if mask[i][j] > 0.5:
+                for c in range(3):
+                    output[i][j][c] = img[i][j][c]
+                    if reverse2: reverse[i][j][c] = 0.0
+            else:
+                for c in range(3):
+                    output[i][j][c] = 0.0
+                    if reverse2: reverse[i][j][c] = img[i][j][c]
+    if reverse2: return output, reverse
+    return output
+
+def nyt_extract(img, title_mask, body_mask):
+    img = cv2.resize(img, (512, 512))
+    title_mask = cv2.resize(title_mask, (512, 512))
+    body_mask = cv2.resize(body_mask, (512, 512))
+    title_insight = mask_color(img, title_mask)
+    body_insight = mask_color(img, body_mask)
+    use_tesseract = True
+    show_image(title_insight)
+    title_raw_ocr = ocr(title_insight)
+    show_image(body_insight)
+    body_raw_ocr = ocr(body_insight)
+    return title_raw_ocr, body_raw_ocr
+
+def nyt(img):
+    title_mask, body_mask = nyt_sgmt(img)
+    print(nyt_extract(img, title_mask, body_mask))
