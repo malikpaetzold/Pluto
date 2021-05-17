@@ -1,5 +1,5 @@
 # Pluto
-# v0.1
+# v0.0.1
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,7 +16,19 @@ use_easyocr = False
 
 tesseract_path = ""
 
-def read_image(path, no_BGR_correction=False):
+def read_image(path: str, no_BGR_correction=False) -> np.ndarray:
+    """Returns an image from a path as a numpy array
+    
+    Args:
+        path: location of the image
+        no_BGR_correction: When True, the color space is not converted from BGR to RGB
+    
+    Returns:
+        The read image as np.ndarray.
+    
+    Raises:
+        AttributeError: if path is not valid, this causes image to be None
+    """
     image = cv2.imread(path)
     if image is None:
         raise AttributeError("Pluto ERROR in read_image() function: Image path is not valid, read object is of type None!")
@@ -24,15 +36,29 @@ def read_image(path, no_BGR_correction=False):
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return image
 
-def show_image(image, BGR2RGB=False):
+def show_image(image: np.ndarray, BGR2RGB=False):
+    """Displays an image using matplotlib's pyplot.imshow()
+    
+    Args:
+        image: the image to be displayed
+        BGR2RGB: When True, the color space is converted from BGR to RGB
+    """
     if BGR2RGB: image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     plt.imshow(image)
     plt.show()
 
-def merge(aimg, bimg):
-    # Merges two images, aimg being the foreground and bing being the background.
-    # aimg.shape[0] < bimg.shape[0] and aimg.shape[1] < bimg.shape[1] and matching dimensions for the color channel(s)
-    # Returns an image with the dimensions of bimg. Only works with RGB and grayscale images.
+def merge(aimg: np.ndarray, bimg: np.ndarray) -> np.ndarray:
+    """Merges two images, aimg being the foreground and bimg being the background.
+    
+    aimg.shape[0] < bimg.shape[0] and aimg.shape[1] < bimg.shape[1] and matching dimensions for the color channel(s)
+    Only works with RGB and grayscale images.
+    
+    Raises:
+        Exception when dimensions are not matching
+    
+    Returns:
+        An image with the dimensions of bimg.
+    """
     color_channels = 1
     if len(aimg.shape) == len(bimg.shape):
         if aimg.shape[2] == 3: color_channels = 3
@@ -52,7 +78,18 @@ def merge(aimg, bimg):
                 out[i][j] = aimg[i][j]
     return out
 
-def input_image(path):
+def input_image(path: str) -> np.ndarray:
+    """Reads image and prepares it for the segmentation models
+
+    Args:
+        path: The location of the image.
+
+    Returns:
+        The image with correct dimensions.
+
+    Raises:
+        AttributeError: If path is not valid. (from read_image())
+    """
     image = read_image(path)
     imshape = image.shape
     image_dimension = max(imshape[0], imshape[1])
@@ -213,7 +250,7 @@ def get_stats(image, already_segmented=False):
     print(lines)
     show_image(stats_subtracted)
 
-def mask_overlay(base, mask1, mask2=None):
+def mask_overlay(base: np.ndarray, mask1: np.ndarray, mask2=None):
     black_img = np.zeros([256, 256]).astype(np.uint8)
     og_img = model_input[0].astype(np.uint8)
     over_img = (output_mask_rough0).astype(np.uint8)
@@ -239,7 +276,16 @@ def display_masks(mask1, mask1_pp=None, mask2=None, mask2_pp=None):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def nyt_sgmt(input_image):
+def nyt_sgmt(input_image: np.ndarray) -> np.ndarray:
+    """Uses a neural network to segmentate a screenshot of a NYT article
+    
+    Args:
+        input_image: The screenshot for segmentation, color and ideally 256x256x3
+    
+    Returns:
+        output_mask_rough0: The post-processed result of nyt_model_0 (isolates title)
+        output_mask_rough1: The post-processed result of nyt_model_1 (isolates text body)
+    """
     import tensorflow as tf
     model_input = cv2.resize(input_image, (IMG_SIZE, IMG_SIZE)) # The model expects an image of size 256x256x3
     model_input = model_input.reshape(-1, IMG_SIZE, IMG_SIZE, 3) # Tensorflow requires the dimensions to be (1, 256, 256, 3)
@@ -261,7 +307,7 @@ def nyt_sgmt(input_image):
     
     return output_mask_rough0, output_mask_rough1
 
-def mask_color(img, mask, reverse2=False):
+def mask_color(img: np.ndarray, mask: np.ndarray, reverse2=False):
     dimensions = img.shape
     output = np.zeros((dimensions[0], dimensions[1], 3)).astype(np.uint8)
     if reverse2: reverse = np.zeros((dimensions[0], dimensions[1], 3)).astype(np.uint8)
@@ -278,7 +324,18 @@ def mask_color(img, mask, reverse2=False):
     if reverse2: return output, reverse
     return output
 
-def nyt_extract(img, title_mask, body_mask):
+def nyt_extract(img: np.ndarray, title_mask: np.ndarray, body_mask: np.ndarray) -> str:
+    """Applies the OCR on isolated parts of the screenshots
+    
+    Args:
+        img: The original screenshot, ideally 512x512x3
+        title_mask: Mask that isolates the title, must be grayscale, ideally 512x512x1
+        body_mask: Mask that isolates the text body, must be grayscale, ideally 512x512x1
+    
+    Returns:
+        title_raw_ocr: The raw result of the OCR library applied to the title
+        body_raw_ocr: The raw result of the OCR library applied to the text body
+    """
     img = cv2.resize(img, (512, 512))
     title_mask = cv2.resize(title_mask, (512, 512))
     body_mask = cv2.resize(body_mask, (512, 512))
@@ -291,6 +348,6 @@ def nyt_extract(img, title_mask, body_mask):
     body_raw_ocr = ocr(body_insight)
     return title_raw_ocr, body_raw_ocr
 
-def nyt(img):
+def nyt(img: np.ndarray):
     title_mask, body_mask = nyt_sgmt(img)
     print(nyt_extract(img, title_mask, body_mask))

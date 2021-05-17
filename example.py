@@ -1,6 +1,4 @@
 import pluto as pl
-import matplotlib.pyplot as plt
-import numpy as np
 
 path = "NYT_Example.jpg"
 pl.use_tesseract = True
