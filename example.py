@@ -1,6 +1,6 @@
 import pluto as pl
 
-path = "NYT_Example.jpg"
+path = "NYT_Example_1.jpg"
 pl.use_tesseract = True
 pl.tesseract_path = r"C:/Program Files/Tesseract-OCR/tesseract.exe"
 

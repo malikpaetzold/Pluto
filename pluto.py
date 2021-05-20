@@ -16,7 +16,7 @@ use_easyocr = False
 
 tesseract_path = ""
 
-def read_image(path: str, no_BGR_correction=False) -> np.ndarray:
+def read_image(path: str, no_BGR_correction=False):  # -> np.ndarray
     """Returns an image from a path as a numpy array
     
     Args:
@@ -30,8 +30,7 @@ def read_image(path: str, no_BGR_correction=False) -> np.ndarray:
         AttributeError: if path is not valid, this causes image to be None
     """
     image = cv2.imread(path)
-    if image is None:
-        raise AttributeError("Pluto ERROR in read_image() function: Image path is not valid, read object is of type None!")
+    if image is None: raise AttributeError("Pluto ERROR in read_image() function: Image path is not valid, read object is of type None!")
     if no_BGR_correction: return image
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return image
@@ -47,7 +46,7 @@ def show_image(image: np.ndarray, BGR2RGB=False):
     plt.imshow(image)
     plt.show()
 
-def merge(aimg: np.ndarray, bimg: np.ndarray) -> np.ndarray:
+def merge(aimg: np.ndarray, bimg: np.ndarray):  # -> np.ndarray
     """Merges two images, aimg being the foreground and bimg being the background.
     
     aimg.shape[0] < bimg.shape[0] and aimg.shape[1] < bimg.shape[1] and matching dimensions for the color channel(s)
@@ -57,7 +56,7 @@ def merge(aimg: np.ndarray, bimg: np.ndarray) -> np.ndarray:
         Exception when dimensions are not matching
     
     Returns:
-        An image with the dimensions of bimg.
+        A np.ndarray with the dimensions of bimg.
     """
     color_channels = 1
     if len(aimg.shape) == len(bimg.shape):
@@ -78,14 +77,15 @@ def merge(aimg: np.ndarray, bimg: np.ndarray) -> np.ndarray:
                 out[i][j] = aimg[i][j]
     return out
 
-def input_image(path: str) -> np.ndarray:
+def input_image(path: str):  # -> np.ndarray
     """Reads image and prepares it for the segmentation models
+    The correct dimension for the segmentation models is 256x256.
 
     Args:
         path: The location of the image.
 
     Returns:
-        The image with correct dimensions.
+        A np.ndarray of the image with correct dimensions.
 
     Raises:
         AttributeError: If path is not valid. (from read_image())
@@ -118,7 +118,7 @@ def ocr(image, override=False, function_use_tesseract=False, function_use_easyoc
     if use_easyocr:
         import easyocr
         reader = easyocr.Reader(['en'])
-        return reader.readtext(image)
+        return reader.readtext(image, detail=0)
     
     print("Pluto WARNING - Check if use_tesseract and use_easyocr attributes are set.")
     return None
@@ -250,18 +250,42 @@ def get_stats(image, already_segmented=False):
     print(lines)
     show_image(stats_subtracted)
 
-def mask_overlay(base: np.ndarray, mask1: np.ndarray, mask2=None):
+def mask_overlay(base: np.ndarray, mask1: np.ndarray, mask2=None, display=False):  # -> np.ndarray
+    """Shows up to two mask by overlaying them on the original image.
+    
+    Mask images must be 255x255, base 3 color channels and both masks 1 color channel!
+    
+    Raises:
+        AttributeError: When base or mask1 are None
+        Exception when wrong dimensions.
+    
+    Returns:
+        np.ndarray with the dimensions of bimg
+    """
+    print(base.shape)
+    if base is None: raise AttributeError("Pluto ERROR in mask_overlay() function: 'base' parameter is of type None!")
+    if mask1 is None: raise AttributeError("Pluto ERROR in mask_overlay() function: 'mask1' parameter is of type None!")
+    print(base.shape)
+    if base.shape != (256, 256, 3):
+        print("Pluto WARNING - mask_overlay() - 'base' shape: ", base.base)
+        raise Exception("The dimension of the 'base' image must be 256x256x3!")
+    if mask1.shape != (256, 256):
+        print("Pluto WARNING - mask_overlay() - mask1 shape: ", mask1.shape)
+        raise Exception("mask1 must be 256x256!")
     black_img = np.zeros([256, 256]).astype(np.uint8)
-    og_img = model_input[0].astype(np.uint8)
-    over_img = (output_mask_rough0).astype(np.uint8)
+    over_img = (mask1).astype(np.uint8)
     cor_overlay_image = cv2.merge((over_img, black_img, black_img))
-    out = cv2.addWeighted(og_img, 0.5, cor_overlay_image, 1.0, 0)
-    over_img = (output_mask_rough1).astype(np.uint8)
-    cor_overlay_image = cv2.merge((black_img, black_img, over_img))
-    out = cv2.addWeighted(out, 0.5, cor_overlay_image, 1.0, 0)
-
-    plt.imshow(out)
-    plt.show()
+    out = cv2.addWeighted(base, 0.5, cor_overlay_image, 1.0, 0)
+    if mask2 is not None:
+        if mask2.shape != (256, 256):
+            print("Pluto WARNING - mask_overlay() - mask2 shape: ", mask2.shape)
+            raise Exception("mask2 must be 256x256!")
+        over_img = (mask2).astype(np.uint8)
+        cor_overlay_image = cv2.merge((black_img, black_img, over_img))
+        out = cv2.addWeighted(out, 0.5, cor_overlay_image, 1.0, 0)
+    if display: show_image(out)
+    print(type(out))
+    return out
 
 def display_masks(mask1, mask1_pp=None, mask2=None, mask2_pp=None):
     try:
@@ -276,22 +300,25 @@ def display_masks(mask1, mask1_pp=None, mask2=None, mask2_pp=None):
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def nyt_sgmt(input_image: np.ndarray) -> np.ndarray:
+def nyt_sgmt(input_image: np.ndarray, verbose=1):  # -> np.ndarray
     """Uses a neural network to segmentate a screenshot of a NYT article
     
     Args:
         input_image: The screenshot for segmentation, color and ideally 256x256x3
+        verbose: log level. 1 for prints, 0 for keeping the output clean
     
     Returns:
-        output_mask_rough0: The post-processed result of nyt_model_0 (isolates title)
-        output_mask_rough1: The post-processed result of nyt_model_1 (isolates text body)
+        output_mask_rough0: np.ndarray with post-processed result of nyt_model_0 (isolates title)
+        output_mask_rough1: np.ndarray with post-processed result of nyt_model_1 (isolates text body)
     """
+    if verbose == 1: print("Pluto NYT --- Loading models...")
     import tensorflow as tf
     model_input = cv2.resize(input_image, (IMG_SIZE, IMG_SIZE)) # The model expects an image of size 256x256x3
     model_input = model_input.reshape(-1, IMG_SIZE, IMG_SIZE, 3) # Tensorflow requires the dimensions to be (1, 256, 256, 3)
     model0 = tf.keras.models.load_model("models/nyt_model_0") # load both models from the "models" folder
     model1 = tf.keras.models.load_model("models/nyt_model_1")
-
+    
+    if verbose == 1: print("Pluto NYT --- Segmentation & post-processing...")
     prediction0 = model0.predict(model_input)[0] * 255  # The model returns its predictions in the dimension (1, 256, 256, 1) with values ranging from 0-1
     prediction1 = model1.predict(model_input)[0] * 255  # But the desired output is (256, 256, 1) with values ranging from 0-255
 
@@ -303,7 +330,7 @@ def nyt_sgmt(input_image: np.ndarray) -> np.ndarray:
     
     # display_masks(None)
     
-    # mask_overlay(None)
+    mask_overlay(input_image, output_mask_rough0, output_mask_rough1, True)
     
     return output_mask_rough0, output_mask_rough1
 
@@ -324,30 +351,41 @@ def mask_color(img: np.ndarray, mask: np.ndarray, reverse2=False):
     if reverse2: return output, reverse
     return output
 
-def nyt_extract(img: np.ndarray, title_mask: np.ndarray, body_mask: np.ndarray) -> str:
+def nyt_extract(img: np.ndarray, title_mask: np.ndarray, body_mask: np.ndarray, verbose=1):  # -> str
     """Applies the OCR on isolated parts of the screenshots
     
     Args:
         img: The original screenshot, ideally 512x512x3
         title_mask: Mask that isolates the title, must be grayscale, ideally 512x512x1
         body_mask: Mask that isolates the text body, must be grayscale, ideally 512x512x1
+        verbose: log level. 1 for prints, 0 for keeping the output clean
     
     Returns:
-        title_raw_ocr: The raw result of the OCR library applied to the title
-        body_raw_ocr: The raw result of the OCR library applied to the text body
+        title_raw_ocr: String with raw result of the OCR library applied to the title
+        body_raw_ocr: String with raw result of the OCR library applied to the text body
     """
     img = cv2.resize(img, (512, 512))
     title_mask = cv2.resize(title_mask, (512, 512))
     body_mask = cv2.resize(body_mask, (512, 512))
     title_insight = mask_color(img, title_mask)
     body_insight = mask_color(img, body_mask)
-    use_tesseract = True
+    use_tesseract = False
+    use_easyocr = True
     show_image(title_insight)
+    if verbose == 1: print("Pluto NYT --- Performing OCR...")
     title_raw_ocr = ocr(title_insight)
+    print("Raw OCR: ", title_raw_ocr)
     show_image(body_insight)
     body_raw_ocr = ocr(body_insight)
+    print("Raw OCR: ", body_raw_ocr)
     return title_raw_ocr, body_raw_ocr
 
-def nyt(img: np.ndarray):
-    title_mask, body_mask = nyt_sgmt(img)
-    print(nyt_extract(img, title_mask, body_mask))
+def nyt(img: np.ndarray, verbose=1):
+    """High-level function 
+    
+    Args:
+        img: The screenshot
+        verbose: log level. 1 for prints, 0 for keeping the output clean
+    """
+    title_mask, body_mask = nyt_sgmt(img, verbose)
+    print(nyt_extract(img, title_mask, body_mask, verbose))
