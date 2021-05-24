@@ -1,5 +1,5 @@
 # Pluto
-# v0.0.1
+# v0.0.3
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -125,6 +125,8 @@ def ocr(image, override=False, function_use_tesseract=False, function_use_easyoc
 
 def expand_to_rows(image: np.ndarray):
     """
+    Args:
+        image: An image as np.ndarray, which represents a mask
     """
     dimensions = image.shape
     for i in range(int(dimensions[0] / 2)):
@@ -365,8 +367,8 @@ def nyt_extract(img: np.ndarray, title_mask: np.ndarray, body_mask: np.ndarray, 
     """
     title_insight = mask_color(img, title_mask)
     body_insight = mask_color(img, body_mask)
-    use_tesseract = False
-    use_easyocr = True
+    # use_tesseract = False
+    # use_easyocr = True
     show_image(title_insight)
     if verbose == 1: print("Pluto NYT --- Performing OCR...")
     title_ocr_result = ocr_cleanup(ocr(title_insight))
@@ -464,6 +466,8 @@ class Twitter:
         if not already_segmented:
             text_subtracted = self.sgmtn_header(image)
         
+        show_image(text_subtracted)
+        # print(ocr(text_subtracted))
         ocr_result = ocr_cleanup(ocr(text_subtracted))
         print("OCR clean: ", ocr_result)
         data = ocr_result.split("@")
