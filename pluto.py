@@ -123,7 +123,9 @@ def ocr(image, override=False, function_use_tesseract=False, function_use_easyoc
     print("Pluto WARNING - Check if use_tesseract and use_easyocr attributes are set.")
     return None
 
-def expand_to_rows(image):
+def expand_to_rows(image: np.ndarray):
+    """
+    """
     dimensions = image.shape
     for i in range(int(dimensions[0] / 2)):
         for j in range(dimensions[1]):
@@ -133,53 +135,6 @@ def expand_to_rows(image):
         for j in range(dimensions[1]):
             image[i][j] = 0
     return image
-
-def sgmtn_header(image, reverse_output=False, reverse_only=False):
-    # Requires RGB image. Returns masked image in original dimensions.
-    original_dimensions = image.shape
-    
-    try:
-        import tensorflow as tf
-        from tensorflow.compat.v1.keras.backend import set_session
-        config = tf.compat.v1.ConfigProto()
-        config.gpu_options.allow_growth = True
-        config.log_device_placement = True
-        sess = tf.compat.v1.Session(config=config)
-        set_session(sess)
-    except ModuleNotFoundError as e:
-        print("Please make shure to install Tensorflow dependency. Original error: ", e)
-    
-    new_array = cv2.resize(image, (IMG_SIZE, IMG_SIZE))
-    image_reshape = new_array.reshape(-1, IMG_SIZE, IMG_SIZE, 3) 
-    
-    model = tf.keras.models.load_model("D:/Codeing/Twitter_Segmentation/model_2")
-    prediction = model.predict(image_reshape)[0] * 255
-    
-    output_mask_blur = cv2.blur(prediction, (10, 10))
-    output_mask_rough = (output_mask_blur > 0.9).astype(np.uint8) * 255
-    output_mask_upscale = cv2.resize(output_mask_blur, (original_dimensions[0], original_dimensions[1]))
-    output_mask = expand_to_rows(output_mask_upscale)
-    show_image(output_mask)
-    output = np.zeros((original_dimensions[0], original_dimensions[1], 3)).astype(np.uint8)
-    reverse = np.zeros((original_dimensions[0], original_dimensions[1], 3)).astype(np.uint8)
-    
-    for i in range(original_dimensions[0]):
-        for j in range(original_dimensions[1]):
-            if output_mask_upscale[i][j] > 0.5:
-                for c in range(3):
-                    output[i][j][c] = image[i][j][c]
-                    reverse[i][j][c] = 0.0
-            else:
-                for c in range(3):
-                    output[i][j][c] = 0.0
-                    reverse[i][j][c] = image[i][j][c]
-    
-    if reverse_output:
-        return output, reverse
-    elif reverse_only:
-        return reverse
-    else:
-        return output
 
 def sgmtn_stats(image, reverse_output=False, reverse_only=False):
     # Requires RGB image. Returns masked image in original dimensions.
@@ -221,15 +176,6 @@ def sgmtn_stats(image, reverse_output=False, reverse_only=False):
     else:
         return output
 
-def get_header(image, already_segmented=False):
-    text_subtracted = image
-    if not already_segmented:
-        text_subtracted = sgmtn_header(image)
-    
-    print(ocr(text_subtracted))
-    
-    show_image(text_subtracted)
-
 def get_text(image, already_segmented=False):
     header_subtracted = image
     if not already_segmented:
@@ -249,6 +195,45 @@ def get_stats(image, already_segmented=False):
     lines = ocr_result.split("\n")
     print(lines)
     show_image(stats_subtracted)
+
+def ocr_cleanup(text: str):  # -> str
+    """Removes unwanted characters or symbols from a text
+    
+    This includes \n, \x0c, and multiple ' ' 
+    
+    Args:
+        text: The String for cleanup.
+    
+    Returns:
+        The cleaned text as String.
+    """
+    out = text.replace("\n", "")
+    out = out.replace("\x0c", "")
+    out = " ".join(out.split())
+    
+    splits = out.split(",")
+    clean_splits = []
+    
+    for phrase in splits:
+        arr = list(phrase)
+        l = len(arr)
+        start = 0
+        end = l
+        for i in range(0, l):
+            if arr[i] == " ": start += 1
+            else: break
+        for i in range(l, 0, -1):
+            if arr[i-1] == " ": end -= 1
+            else: break
+        clean_splits.append(phrase[start:end])
+    
+    out = ""
+    for phrase in clean_splits:
+        out += phrase
+        out += ", "
+    out = out[:-2]
+    
+    return out
 
 def mask_overlay(base: np.ndarray, mask1: np.ndarray, mask2=None, display=False):  # -> np.ndarray
     """Shows up to two mask by overlaying them on the original image.
@@ -330,16 +315,30 @@ def nyt_sgmt(input_image: np.ndarray, verbose=1):  # -> np.ndarray
     
     # display_masks(None)
     
-    mask_overlay(input_image, output_mask_rough0, output_mask_rough1, True)
+    # mask_overlay(input_image, output_mask_rough0, output_mask_rough1, True)
     
     return output_mask_rough0, output_mask_rough1
 
-def mask_color(img: np.ndarray, mask: np.ndarray, reverse2=False):
-    dimensions = img.shape
-    output = np.zeros((dimensions[0], dimensions[1], 3)).astype(np.uint8)
-    if reverse2: reverse = np.zeros((dimensions[0], dimensions[1], 3)).astype(np.uint8)
-    for i in range(dimensions[0]):
-        for j in range(dimensions[1]):
+def mask_color(img: np.ndarray, mask: np.ndarray, reverse2=False):  # -> np.ndarray
+    """Applies a mask oto an image, isolating the area of interest
+    
+    Args:
+        img: The image the mask should be applied to.
+        mask: The mask as a grayscale image.
+        reverse2: If True, an additional image with an inverted mask applied.
+    
+    Returns:
+        One or two image(s) as np.ndarray with an applied mask.
+    """
+    dimensions_img = img.shape
+    dimensions_mask = mask.shape
+    if dimensions_img != dimensions_mask:
+        if dimensions_img < dimensions_mask: img = cv2.resize(img, (dimensions_mask[0], dimensions_mask[1]))
+        else: mask = cv2.resize(mask, (dimensions_img[0], dimensions_img[1]))
+    output = np.zeros((dimensions_img[0], dimensions_img[1], 3)).astype(np.uint8)
+    if reverse2: reverse = np.zeros((dimensions_img[0], dimensions_img[1], 3)).astype(np.uint8)
+    for i in range(dimensions_img[0]):
+        for j in range(dimensions_img[1]):
             if mask[i][j] > 0.5:
                 for c in range(3):
                     output[i][j][c] = img[i][j][c]
@@ -352,40 +351,131 @@ def mask_color(img: np.ndarray, mask: np.ndarray, reverse2=False):
     return output
 
 def nyt_extract(img: np.ndarray, title_mask: np.ndarray, body_mask: np.ndarray, verbose=1):  # -> str
-    """Applies the OCR on isolated parts of the screenshots
+    """Applies the OCR on isolated parts of an image
     
     Args:
-        img: The original screenshot, ideally 512x512x3
-        title_mask: Mask that isolates the title, must be grayscale, ideally 512x512x1
-        body_mask: Mask that isolates the text body, must be grayscale, ideally 512x512x1
+        img: The original screenshot
+        title_mask: Mask that isolates the title, must be grayscale
+        body_mask: Mask that isolates the text body, must be grayscale
         verbose: log level. 1 for prints, 0 for keeping the output clean
     
     Returns:
         title_raw_ocr: String with raw result of the OCR library applied to the title
         body_raw_ocr: String with raw result of the OCR library applied to the text body
     """
-    img = cv2.resize(img, (512, 512))
-    title_mask = cv2.resize(title_mask, (512, 512))
-    body_mask = cv2.resize(body_mask, (512, 512))
     title_insight = mask_color(img, title_mask)
     body_insight = mask_color(img, body_mask)
     use_tesseract = False
     use_easyocr = True
     show_image(title_insight)
     if verbose == 1: print("Pluto NYT --- Performing OCR...")
-    title_raw_ocr = ocr(title_insight)
-    print("Raw OCR: ", title_raw_ocr)
+    title_ocr_result = ocr_cleanup(ocr(title_insight))
     show_image(body_insight)
-    body_raw_ocr = ocr(body_insight)
-    print("Raw OCR: ", body_raw_ocr)
-    return title_raw_ocr, body_raw_ocr
+    body_ocr_result = ocr_cleanup(ocr(body_insight))
+    return title_ocr_result, body_ocr_result
 
 def nyt(img: np.ndarray, verbose=1):
-    """High-level function 
+    """High-level function
+    Extracts information from screenshots of New York Times articles.
     
     Args:
         img: The screenshot
         verbose: log level. 1 for prints, 0 for keeping the output clean
     """
     title_mask, body_mask = nyt_sgmt(img, verbose)
-    print(nyt_extract(img, title_mask, body_mask, verbose))
+    extracted_data = nyt_extract(img, title_mask, body_mask, verbose)
+    print(extracted_data)
+
+class Twitter:
+    def __init__(self, image, handle=None):
+        self.image = image
+        self.handle = handle
+    
+    def sgmtn_header(self, image=None, reverse_output=False, reverse_only=False):  # -> np.ndarray
+        """Applies the header segmentation model to an image
+        
+        Args:
+            image: An image as np.ndarray for the segmentation model
+            reverse_output: True, if a second image with an inverted mask should be output.
+            reverse_only: True, if only an image with an inverted mask should be output.
+        
+        Returns:
+            An np.ndarray with the masked image in original dimensions.
+        """
+        # Requires RGB image. Returns masked image in original dimensions.
+        if image is None: image = self.image
+        original_dimensions = image.shape
+        
+        try:
+            import tensorflow as tf
+            from tensorflow.compat.v1.keras.backend import set_session
+            config = tf.compat.v1.ConfigProto()
+            config.gpu_options.allow_growth = True
+            config.log_device_placement = True
+            sess = tf.compat.v1.Session(config=config)
+            set_session(sess)
+        except ModuleNotFoundError as e:
+            print("Please make shure to install Tensorflow dependency. Original error: ", e)
+        
+        new_array = cv2.resize(image, (IMG_SIZE, IMG_SIZE))
+        image_reshape = new_array.reshape(-1, IMG_SIZE, IMG_SIZE, 3) 
+        
+        model = tf.keras.models.load_model("D:/Codeing/Twitter_Segmentation/model_2")
+        prediction = model.predict(image_reshape)[0] * 255
+        
+        output_mask_blur = cv2.blur(prediction, (10, 10))
+        output_mask_rough = (output_mask_blur > 0.9).astype(np.uint8) * 255
+        output_mask_upscale = cv2.resize(output_mask_blur, (original_dimensions[0], original_dimensions[1]))
+        output_mask = expand_to_rows(output_mask_upscale)
+        show_image(output_mask)
+        output = np.zeros((original_dimensions[0], original_dimensions[1], 3)).astype(np.uint8)
+        reverse = np.zeros((original_dimensions[0], original_dimensions[1], 3)).astype(np.uint8)
+        
+        for i in range(original_dimensions[0]):
+            for j in range(original_dimensions[1]):
+                if output_mask_upscale[i][j] > 0.5:
+                    for c in range(3):
+                        output[i][j][c] = image[i][j][c]
+                        reverse[i][j][c] = 0.0
+                else:
+                    for c in range(3):
+                        output[i][j][c] = 0.0
+                        reverse[i][j][c] = image[i][j][c]
+        
+        if reverse_output:
+            return output, reverse
+        elif reverse_only:
+            return reverse
+        else:
+            return output
+    
+    def get_header(self, image=None, already_segmented=False):  # -> str
+        """Extracts the Username and Handle from the image
+        
+        Args:
+            image: The screenshot as np.ndarray, by default the self.image
+            already_segmentated = When the image is already correctly segmentated, choose True.
+        
+        Returns:
+        """
+        if image is None:
+            image = self.image
+        text_subtracted = image
+        if not already_segmented:
+            text_subtracted = self.sgmtn_header(image)
+        
+        ocr_result = ocr_cleanup(ocr(text_subtracted))
+        print("OCR clean: ", ocr_result)
+        data = ocr_result.split("@")
+        self.handle = data[1]
+        return data[0], data[1]
+    
+    def open_account(self, handle=None):
+        """Opens the URL to the account with given handle
+        
+        Args:
+            handle: The handle of the account (without '@' in the beginning)
+        """
+        if handle is None: handle = self.handle
+        import webbrowser
+        webbrowser.open(("https://twitter.com/" + handle), new=2)
