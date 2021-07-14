@@ -1,25 +1,17 @@
+# Requirements:
+#
+# You will need to have NumPy, Matplotlib, Cv2, and PyTesseract installed.
+
 import pluto as pl
+from pluto import FoxNews
 
-path = "NYT_Example_1.jpg"
-pl.use_tesseract = True
-pl.tesseract_path = r"C:/Program Files/Tesseract-OCR/tesseract.exe"
-
-img = pl.input_image(path)
-
+# load and show image
+path = "FoxNews_Example_1.jpg"
+img = pl.read_image(path)
 pl.show_image(img)
 
-pl.nyt(img)
+# create an pluto object for Fox News articles, analyse screenshot
+foxarticle = FoxNews(img)
+foxarticle.tesseract_path = "C:/Program Files/Tesseract-OCR/tesseract.exe" # This is just the default path. You may need to change it for your system.
 
-# --- ---
-# Twitter Example
-# --- ---
-
-path = "Twitter_Example_1.jpg"
-
-img = pl.input_image(path)
-
-screenshot1 = pl.Twitter(img)
-
-username, handle = screenshot1.get_header()
-
-screenshot1.open_account()
+print(foxarticle.analyse())
