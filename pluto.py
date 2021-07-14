@@ -483,99 +483,225 @@ class PlutoObject:
         out = json.dumps(data)
         return out
 
-    def __init__(self, image, handle=None):
-        self.image = image
-        self.handle = handle
+class FoxNews(PlutoObject):
+    def __init__(self, img: np.ndarray):
+        super().__init__(img)
     
-    def sgmtn_header(self, image=None, reverse_output=False, reverse_only=False):  # -> np.ndarray
-        """Applies the header segmentation model to an image
+    def analyse(self, display=False):
+        og_shape = self.img.shape
+        img = cv2.resize(self.img, (512, 512))
+        black = np.zeros((512, 512))
+
+        for i in range(len(black)):
+            for j in range(len(black[0])):
+                temp = img[i][j]
+                if (temp == [34, 34, 34]).all(): black[i][j] = 255
+        blured = cv2.blur(black, (20, 20))
+
+        for i in range(len(blured)):
+            for j in range(len(blured[0])):
+                if blured[i][j] < 40: blured[i][j] = 0
+                else: blured[i][j] = 255
+
+        msk = self.expand_to_rows(blured)
+
+        og_size_msk = cv2.resize(msk, (og_shape[1], og_shape[0]))
         
-        Args:
-            image: An image as np.ndarray for the segmentation model
-            reverse_output: True, if a second image with an inverted mask should be output.
-            reverse_only: True, if only an image with an inverted mask should be output.
+        top = []
+        heading = []
+        bottom = []
+
+        top_part = True
+        bottom_part = False
+
+        for i in range(len(self.img)):
+            if og_size_msk[i][0] > 1:
+                heading.append(self.img[i])
+                if top_part:
+                    top_part = False
+                    bottom_part = True
+            elif top_part: top.append(self.img[i])
+            else: bottom.append(self.img[i])
+
+        heading = np.array(heading)
+        bottom = np.array(bottom)
+        top = np.array(top)
         
-        Returns:
-            An np.ndarray with the masked image in original dimensions.
-        """
-        # Requires RGB image. Returns masked image in original dimensions.
-        if image is None: image = self.image
-        original_dimensions = image.shape
+        if display:
+            show_image(heading)
+            show_image(bottom)
+            show_image(top)
+
+        ocr_result = self.ocr(heading)
+        headline = self.ocr_cleanup(ocr_result)
+
+        cat_info_img = []
+        top_len = len(top)
+        for i in range(top_len, 0, -1):
+            if top[i-1][0][0] > 250: cat_info_img.insert(0, top[i-1])
+            else: break
+
+        cat_info_img = np.array(cat_info_img)
+        if display: show_image(cat_info_img)
+
+        ocr_result = self.ocr(cat_info_img)
+        clean_ocr = self.ocr_cleanup(ocr_result)
+
+        dotsplit = clean_ocr.split("-")[0][:-1].lstrip(" ")
+        pubsplit = clean_ocr.split("Published")[1].lstrip(" ")
         
-        try:
-            import tensorflow as tf
-            from tensorflow.compat.v1.keras.backend import set_session
-            config = tf.compat.v1.ConfigProto()
-            config.gpu_options.allow_growth = True
-            config.log_device_placement = True
-            sess = tf.compat.v1.Session(config=config)
-            set_session(sess)
-        except ModuleNotFoundError as e:
-            print("Please make shure to install Tensorflow dependency. Original error: ", e)
+        subinfo_bottom = []
+
+        stoper = False
+        for row in bottom:
+            subinfo_bottom.append(row)
+            for pix in row:
+                if pix[0] > 200 and pix[0] < 240 and pix[2] < 50 and pix[1] < 50:
+                    stoper = True
+                    break
+            if stoper: break
+
+        subinfo_bottom = np.array(subinfo_bottom[:-3])
+        if display: show_image(subinfo_bottom)
+        subinfo = self.ocr_cleanup(self.ocr(subinfo_bottom))
+
+        subsplit = subinfo.split()
+
+        author_list = []
+        subtitle_list = []
+        subinfo_switcher = True
+
+        for w in reversed(subsplit):
+            if w == "By" and subinfo_switcher:
+                subinfo_switcher = False
+                continue
+            if w == "News" or w == "Fox" or w == "|": continue
+            if subinfo_switcher: author_list.insert(0, w)
+            else: subtitle_list.insert(0, w)
+
+        author = " ".join(author_list)
+        subtitle = " ".join(subtitle_list)
         
-        new_array = cv2.resize(image, (IMG_SIZE, IMG_SIZE))
-        image_reshape = new_array.reshape(-1, IMG_SIZE, IMG_SIZE, 3) 
+        jasoon = {  "source": "News Article",
+                    "article": {
+                        "created": "[Published] " + pubsplit,
+                        "organisation": "Fox News",
+                        "headline": headline,
+                        "subtitle": subtitle,
+                        "author": author,
+                        "category": dotsplit
+                    }
+                }
         
-        model = tf.keras.models.load_model("D:/Codeing/Twitter_Segmentation/model_2")
-        prediction = model.predict(image_reshape)[0] * 255
-        
-        output_mask_blur = cv2.blur(prediction, (10, 10))
-        output_mask_rough = (output_mask_blur > 0.9).astype(np.uint8) * 255
-        output_mask_upscale = cv2.resize(output_mask_blur, (original_dimensions[0], original_dimensions[1]))
-        output_mask = expand_to_rows(output_mask_upscale)
-        show_image(output_mask)
-        output = np.zeros((original_dimensions[0], original_dimensions[1], 3)).astype(np.uint8)
-        reverse = np.zeros((original_dimensions[0], original_dimensions[1], 3)).astype(np.uint8)
-        
-        for i in range(original_dimensions[0]):
-            for j in range(original_dimensions[1]):
-                if output_mask_upscale[i][j] > 0.5:
-                    for c in range(3):
-                        output[i][j][c] = image[i][j][c]
-                        reverse[i][j][c] = 0.0
-                else:
-                    for c in range(3):
-                        output[i][j][c] = 0.0
-                        reverse[i][j][c] = image[i][j][c]
-        
-        if reverse_output:
-            return output, reverse
-        elif reverse_only:
-            return reverse
-        else:
-            return output
+        return self.to_json(jasoon)
+
+    def __init__(self, img: np.ndarray):
+        super().__init__(img)
     
-    def get_header(self, image=None, already_segmented=False):  # -> str
-        """Extracts the Username and Handle from the image
+    def analyse(self, display=False):
+        og_shape = self.img.shape
+        img = cv2.resize(self.img, (512, 512))
+        black = np.zeros((512, 512))
+
+        for i in range(len(black)):
+            for j in range(len(black[0])):
+                temp = img[i][j]
+                if (temp == [34, 34, 34]).all(): black[i][j] = 255
+        blured = cv2.blur(black, (20, 20))
+
+        for i in range(len(blured)):
+            for j in range(len(blured[0])):
+                if blured[i][j] < 40: blured[i][j] = 0
+                else: blured[i][j] = 255
+
+        msk = self.expand_to_rows(blured)
+
+        og_size_msk = cv2.resize(msk, (og_shape[1], og_shape[0]))
         
-        Args:
-            image: The screenshot as np.ndarray, by default the self.image
-            already_segmentated = When the image is already correctly segmentated, choose True.
+        top = []
+        heading = []
+        bottom = []
+
+        top_part = True
+        bottom_part = False
+
+        for i in range(len(self.img)):
+            if og_size_msk[i][0] > 1:
+                heading.append(self.img[i])
+                if top_part:
+                    top_part = False
+                    bottom_part = True
+            elif top_part: top.append(self.img[i])
+            else: bottom.append(self.img[i])
+
+        heading = np.array(heading)
+        bottom = np.array(bottom)
+        top = np.array(top)
         
-        Returns:
-        """
-        if image is None:
-            image = self.image
-        text_subtracted = image
-        if not already_segmented:
-            text_subtracted, header_subtracted = self.sgmtn_header(image, True)
+        if display:
+            show_image(heading)
+            show_image(bottom)
+            show_image(top)
+
+        ocr_result = self.ocr(heading)
+        headline = self.ocr_cleanup(ocr_result)
+
+        cat_info_img = []
+        top_len = len(top)
+        for i in range(top_len, 0, -1):
+            if top[i-1][0][0] > 250: cat_info_img.insert(0, top[i-1])
+            else: break
+
+        cat_info_img = np.array(cat_info_img)
+        if display: show_image(cat_info_img)
+
+        ocr_result = self.ocr(cat_info_img)
+        clean_ocr = self.ocr_cleanup(ocr_result)
+
+        dotsplit = clean_ocr.split("-")[0][:-1].lstrip(" ")
+        pubsplit = clean_ocr.split("Published")[1].lstrip(" ")
         
-        show_image(text_subtracted)
-        show_image(header_subtracted)
-        # print(ocr(text_subtracted))
-        ocr_result = ocr_cleanup(ocr(text_subtracted))
-        print("OCR clean: ", ocr_result)
-        print(ocr(header_subtracted))
-        data = ocr_result.split("@")
-        self.handle = data[1]
-        return data[0], data[1]
-    
-    def open_account(self, handle=None):
-        """Opens the URL to the account with given handle
+        subinfo_bottom = []
+
+        stoper = False
+        for row in bottom:
+            subinfo_bottom.append(row)
+            for pix in row:
+                if pix[0] > 200 and pix[0] < 240 and pix[2] < 50 and pix[1] < 50:
+                    stoper = True
+                    break
+            if stoper: break
+
+        subinfo_bottom = np.array(subinfo_bottom[:-3])
+        if display: show_image(subinfo_bottom)
+        subinfo = self.ocr_cleanup(self.ocr(subinfo_bottom))
+
+        subsplit = subinfo.split()
+
+        author_list = []
+        subtitle_list = []
+        subinfo_switcher = True
+
+        for w in reversed(subsplit):
+            if w == "By" and subinfo_switcher:
+                subinfo_switcher = False
+                continue
+            if w == "News" or w == "Fox" or w == "|": continue
+            if subinfo_switcher: author_list.insert(0, w)
+            else: subtitle_list.insert(0, w)
+
+        author = " ".join(author_list)
+        subtitle = " ".join(subtitle_list)
         
-        Args:
-            handle: The handle of the account (without '@' in the beginning)
-        """
-        if handle is None: handle = self.handle
-        import webbrowser
-        webbrowser.open(("https://twitter.com/" + handle), new=2)
+        jasoon = {  "source": "News Article",
+                    "article": {
+                        "created": "[Published] " + pubsplit,
+                        "organisation": "Fox News",
+                        "headline": headline,
+                        "subtitle": subtitle,
+                        "author": author,
+                        "category": dotsplit
+                    }
+                }
+        
+        return self.to_json(jasoon)
