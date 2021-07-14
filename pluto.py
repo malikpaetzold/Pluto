@@ -388,7 +388,101 @@ def nyt(img: np.ndarray, verbose=1):
     extracted_data = nyt_extract(img, title_mask, body_mask, verbose)
     print(extracted_data)
 
-class Twitter:
+class PlutoObject:
+    def __init__(self, img: np.ndarray):
+        self.img = img
+        self.use_tesseract = True
+        self.tesseract_path = ""
+        self.use_easyocr = False
+    
+    def ocr(self, image=None, override=False, function_use_tesseract=False, function_use_easyocr=False):  # -> str
+        """Preforms OCR on a given image, using ether Tesseract or EasyOCR
+        
+        Args:
+            image: np.ndarray of the to be treated image.
+        
+        Returns:
+            String with the raw result of the OCR library.
+        
+        """
+        if self.use_tesseract:
+            if self.tesseract_path == "": print("Pluto WARNING - Please check if tesseract_path has been set.")
+            from pytesseract import pytesseract
+            pytesseract.tesseract_cmd = self.tesseract_path
+            text = pytesseract.image_to_string(image)
+            return text
+        if self.use_easyocr:
+            import easyocr
+            reader = easyocr.Reader(['en'])
+            return reader.readtext(image, detail=0)
+
+        print("Pluto WARNING - Check if use_tesseract and use_easyocr attributes are set.")
+        return None
+
+    def expand_to_rows(self, image: np.ndarray, full=False, value=200):  # -> np.ndarray
+        """
+        Args:
+            image: An grayscale image as np.ndarray, which represents a mask.
+        
+        Returns:
+            A np.ndarray of the edited image.
+        """
+        dimensions = image.shape
+        imglen = dimensions[0]
+        if not full: imglen = dimensions[0] / 2
+        for i in range(int(imglen)):
+            for j in range(dimensions[1]):
+                if image[i][j] > value:
+                    image[i] = [255 for k in range(dimensions[1])]
+        for i in range(int(imglen), dimensions[0]):
+            for j in range(dimensions[1]):
+                image[i][j] = 0
+        return image
+    
+    def ocr_cleanup(self, text: str):  # -> str
+        """Removes unwanted characters or symbols from a text
+        
+        This includes \n, \x0c, and multiple ' ' 
+        
+        Args:
+            text: The String for cleanup.
+        
+        Returns:
+            The cleaned text as String.
+        """
+        out = text.replace("\n", " ")
+        out = out.replace("\x0c", "")
+        out = " ".join(out.split())
+        
+        splits = out.split(",")
+        clean_splits = []
+        
+        for phrase in splits:
+            arr = list(phrase)
+            l = len(arr)
+            start = 0
+            end = l
+            for i in range(0, l):
+                if arr[i] == " ": start += 1
+                else: break
+            for i in range(l, 0, -1):
+                if arr[i-1] == " ": end -= 1
+                else: break
+            clean_splits.append(phrase[start:end])
+        
+        out = ""
+        for phrase in clean_splits:
+            out += phrase
+            out += ", "
+        out = out[:-2]
+        
+        return out
+
+    def to_json(self, data: dict):
+        import json
+        out = json.dumps(data)
+        return out
+
     def __init__(self, image, handle=None):
         self.image = image
         self.handle = handle
@@ -464,12 +558,14 @@ class Twitter:
             image = self.image
         text_subtracted = image
         if not already_segmented:
-            text_subtracted = self.sgmtn_header(image)
+            text_subtracted, header_subtracted = self.sgmtn_header(image, True)
         
         show_image(text_subtracted)
+        show_image(header_subtracted)
         # print(ocr(text_subtracted))
         ocr_result = ocr_cleanup(ocr(text_subtracted))
         print("OCR clean: ", ocr_result)
+        print(ocr(header_subtracted))
         data = ocr_result.split("@")
         self.handle = data[1]
         return data[0], data[1]
