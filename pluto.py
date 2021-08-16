@@ -2,8 +2,6 @@
 # v0.1.0
 
 # from temp_depricated import ocr_cleanup
-from json import load
-from math import e
 from typing import Literal
 import numpy as np
 import matplotlib.pyplot as plt
@@ -11,6 +9,7 @@ import cv2
 
 import torch
 import torch.nn as nn
+import torchvision.transforms.functional as tf
 
 import time
 
@@ -233,80 +232,6 @@ def expand_to_rows(image: np.ndarray, full=False, value=200, bigger_than=True): 
                 image[j][i] = 0
         return image
 
-"""
-The following code is forked from aladdinpersson/Machine-Learning-Collection/ML/Pytorch/image_segmentation/semantic_segmentation_unet/model.py 
-
-Copyright (c) 2020 Aladdin Persson
-
-via MIT License
-"""
-class DoubleConv(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(DoubleConv, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),)
-
-    def forward(self, x):
-        return self.conv(x)
-
-class UNET(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512]):
-        super(UNET, self).__init__()
-        self.ups = nn.ModuleList()
-        self.downs = nn.ModuleList()
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-
-        # Down part of UNET
-        for feature in features:
-            self.downs.append(DoubleConv(in_channels, feature))
-            in_channels = feature
-
-        # Up part of UNET
-        for feature in reversed(features):
-            self.ups.append(nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2))
-            self.ups.append(DoubleConv(feature*2, feature))
-
-        self.bottleneck = DoubleConv(features[-1], features[-1]*2)
-        self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
-
-    def forward(self, x):
-        skip_connections = []
-        for down in self.downs:
-            x = down(x)
-            skip_connections.append(x)
-            x = self.pool(x)
-
-        x = self.bottleneck(x)
-        skip_connections = skip_connections[::-1]
-
-        for idx in range(0, len(self.ups), 2):
-            x = self.ups[idx](x)
-            skip_connection = skip_connections[idx//2]
-            if x.shape != skip_connection.shape:
-                x = TF.resize(x, size=skip_connection.shape[2:])
-
-            concat_skip = torch.cat((skip_connection, x), dim=1)
-            x = self.ups[idx+1](concat_skip)
-
-        return self.final_conv(x)
-
-def test():
-    x = torch.randn((3, 1, 161, 161))
-    model = UNET(in_channels=1, out_channels=1)
-    preds = model(x)
-    print(preds.shape)
-    print(x.shape)
-    assert preds.shape == x.shape
-# test()
-"""
-End of forked code
-"""
-
 class PlutoObject:
     def __init__(self, img: np.ndarray):
         self.img = img
@@ -466,7 +391,7 @@ class PlutoObject:
         out = out[:-2]
         
         return out
-    
+
     def to_json(self, data: dict):
         import json
         out = json.dumps(data)
@@ -489,11 +414,22 @@ class PlutoObject:
         return "cuda" if torch.cuda.is_available() else "cpu"
     
     def run_model(self, model, tnsr):
+        """Runs a model with a sigmoid activation function
+        """
         with torch.no_grad():
             prediction = torch.sigmoid(model(tnsr))
         return prediction * 255
     
-    def run_segmentation_model(self, state_path, img=None):
+    def run_segmentation_model(self, state_path, img=None): # -> np.ndarray
+        """Runs a UNET segmentation model given an image and the state of the model.
+        
+        Args:
+            state_path: path to the models's state_dict
+            img: the model's input image
+        
+        Returns:
+            The model's prediction as np.ndarray
+        """
         if img is None: img = self.img
         
         device = self.determine_device()
@@ -564,6 +500,8 @@ class PlutoObject:
         return img
 
     def characters_filter_strict(self, inpt: str, allow_digits=True): # -> str
+        """Filters out unwanted characters in a string
+        """
         numbers =  list(range(128))
         # only digits, uppercase, lowercase and spaces letters are valid
         allowed_ascii_values = numbers[65:91] + numbers[97:123] + [32]
@@ -760,6 +698,14 @@ class Facebook(PlutoObject):
         return name, date, body_text, engagement_text
     
     def dark_mode(self, img=None):
+        """Checks if dark mode is enabled
+        
+        Args:
+            img: input screenshot (optional)
+        
+        Returns:
+            Dark Mode enabled? True / False
+        """
         if img is None: img = self.img
         dim = img.shape
         img = img[:int(dim[0]*0.1),:int(dim[0]*0.02),:]
@@ -767,13 +713,13 @@ class Facebook(PlutoObject):
         return avg < 240
 
     def split(self, img=None, darkmode=None): # -> np.ndarray
-        """Splits a Facebook Screenshot into a top part (thst's where the header is) and a 'bottom' part.
+        """Splits a Facebook Screenshot into a top part (that's where the header is), a 'body' part (main text) and a 'bottom' part ('engagement stats').
         
         Args:
             img: Alternative to the default self.img
         
         Returns:
-            The top part and the bottom part, both as np.ndarray
+            The top, body & bottom part, all as np.ndarray
         """
         if img is None: img = self.img
         og = img.copy()
@@ -830,7 +776,11 @@ class Facebook(PlutoObject):
         return top, body, engagement
     
     def old_topsplit(self, img=None, darkmode=None): # -> np.ndarray
-        """Splits a Facebook Screenshot into a top part (thst's where the header is) and a 'bottom' part.
+        """---
+        DEPRECATED
+        ---
+        
+        Splits a Facebook Screenshot into a top part (thst's where the header is) and a 'bottom' part.
         
         Args:
             img: Alternative to the default self.img
@@ -885,6 +835,8 @@ class Facebook(PlutoObject):
         return top, middle, bottom
     
     def clean_top(self, img=None):
+        """'Cleans' the top excerpt by removing the profile picture
+        """
         if img is None: img = self.top
 
         og_img = img.copy()
@@ -893,7 +845,7 @@ class Facebook(PlutoObject):
         dim = img.shape
         img = cv2.resize(og_img[:,:int(og_img.shape[1]*0.5),:], (200, 200))
         
-        prediction = self.run_segmentation_model("Utility Models/imgd_2_net_1.pt", img)
+        prediction = self.run_segmentation_model("models/fb_mdl_1.pt", img)
         # self.vis_model_prediction(img, prediction, True)
         
         prediction = np.transpose(prediction, (1, 0))
@@ -924,6 +876,8 @@ class Twitter(PlutoObject):
         self.header, self.bottom = None, None
     
     def split(self, img=None, display=False):
+        """Splits the screenshot into header and bottom part
+        """
         img_og = img
         if img is None: img_og = self.img
         img_size = 256
@@ -931,7 +885,7 @@ class Twitter(PlutoObject):
         img_tensor = self.to_tensor(img, img_size, torch.float32, self.DEVICE)
         
         model = UNET(in_channels=3, out_channels=1)
-        model = self.load_model(model, "D:/Codeing/Twitter_Segmentation/pytorch version/own_2_net_2.pt", self.DEVICE)
+        model = self.load_model(model, "models/twitter_split.pt", self.DEVICE)
         
         with torch.no_grad():
             model_out = torch.sigmoid(model(img_tensor)) * 255
@@ -1010,6 +964,8 @@ class Twitter(PlutoObject):
         return usersplit[0][:-1], usersplit[1]
     
     def body_analyse(self, img=None, display=False): # --> str
+        """Extracts information from the body part
+        """
         if img is None: img = self.bottom.copy()
         img_og = img.copy()
         
@@ -1257,7 +1213,7 @@ class NYT(PlutoObject):
                         should also be returned seperatly (basicly a inverted return of this method)
         
         Returns:
-            An isolated part of the original screenshot, which only contains the headline\
+            An isolated part of the original screenshot, which only contains the image\
             (optional an inverted version as well, when non_images is True)
             If no images can be found, the return is None
         
@@ -1300,11 +1256,11 @@ class NYT(PlutoObject):
         return image
     
     def suber(self, img=None):
-        """Isolates the headline from an article, based on color
+        """Isolates the subtitle from an article, based on color
         
         Args:
             img: if the used screenshot should differ from self.img, pass it here
-            non_header: True if all other parts of the screenshot, that don't belong to the headline, \
+            non_header: True if all other parts of the screenshot, that don't belong to the subtitle, \
                         should also be returned seperatly (basicly a inverted return of this method)
         
         Returns:
@@ -1329,6 +1285,14 @@ class NYT(PlutoObject):
         return out
     
     def analyse(self, img=None):
+        """Extracts information from a NYT Screenshot
+        
+        Args:
+            img: if a different image than self.img should be used, pass it here
+        
+        Returns:
+            The headline and subtitle as str (in a tuple)
+        """
         analyse_img = img
         if analyse_img is None: analyse_img = self.img
         color_images, non_color = self.images(analyse_img, True)
@@ -1348,20 +1312,16 @@ class NYT(PlutoObject):
         
         return headline, subtitle
 
-"""
-The following code is forked from aladdinpersson/Machine-Learning-Collection/ML/Pytorch/image_segmentation/semantic_segmentation_unet/model.py 
-
-Copyright (c) 2020 Aladdin Persson
-
-via MIT License
-"""
-class DoubleConv(nn.Module):
+class ConvStage(nn.Module):
+    """Two convolutional layers with batch norm & relu
+    """
     def __init__(self, in_channels, out_channels):
-        super(DoubleConv, self).__init__()
+        super(ConvStage, self).__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, 1, 1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
+            
             nn.Conv2d(out_channels, out_channels, 3, 1, 1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),)
@@ -1370,23 +1330,36 @@ class DoubleConv(nn.Module):
         return self.conv(x)
 
 class UNET(nn.Module):
+    """UNET model.
+    Based on: https://arxiv.org/abs/1505.04597
+    
+    Args:
+        in_channel: input channels, default is 3 for color images
+        out_channel: segmentation mask output channels, default is 1 for grayscale mask
+        features: feature dimensions for the conv stages
+    
+    Disclaimer:
+        Parts of this class have been forked from\
+        https://github.com/aladdinpersson/Machine-Learning-Collection/blob/master/ML/Pytorch/image_segmentation/semantic_segmentation_unet/model.py
+        Copyright (c) 2020 Aladdin Persson
+    """
     def __init__(self, in_channels=3, out_channels=1, features=[64, 128, 256, 512]):
         super(UNET, self).__init__()
         self.ups = nn.ModuleList()
         self.downs = nn.ModuleList()
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        # Down part of UNET
+        # For each feature a conv stage is created (down part)
         for feature in features:
-            self.downs.append(DoubleConv(in_channels, feature))
+            self.downs.append(ConvStage(in_channels, feature))
             in_channels = feature
 
         # Up part of UNET
         for feature in reversed(features):
             self.ups.append(nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2))
-            self.ups.append(DoubleConv(feature*2, feature))
+            self.ups.append(ConvStage(feature*2, feature))
 
-        self.bottleneck = DoubleConv(features[-1], features[-1]*2)
+        self.bottleneck = ConvStage(features[-1], features[-1]*2)
         self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
 
     def forward(self, x):
@@ -1403,21 +1376,9 @@ class UNET(nn.Module):
             x = self.ups[idx](x)
             skip_connection = skip_connections[idx//2]
             if x.shape != skip_connection.shape:
-                x = TF.resize(x, size=skip_connection.shape[2:])
+                x = tf.resize(x, size=skip_connection.shape[2:])
 
             concat_skip = torch.cat((skip_connection, x), dim=1)
             x = self.ups[idx+1](concat_skip)
 
         return self.final_conv(x)
-
-def test():
-    x = torch.randn((3, 1, 161, 161))
-    model = UNET(in_channels=1, out_channels=1)
-    preds = model(x)
-    print(preds.shape)
-    print(x.shape)
-    assert preds.shape == x.shape
-# test()
-"""
-End of forked code
-"""
