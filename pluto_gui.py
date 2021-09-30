@@ -2,160 +2,12 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QApplication, QMainWindow, QInputDialog
 
 import cv2
+from matplotlib.pyplot import text
 import numpy as np
 
 import pluto as pl
 
 util = pl.PlutoObject(None)
-
-class Ui_MainWindow(QMainWindow):
-    def setupUi(self, MainWindow):
-        MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(547, 349)
-        self.setWindowIcon(QtGui.QIcon("D:\\Codeing\\Pluto-Nightly\\icon.png"))
-        self.centralwidget = QtWidgets.QWidget(MainWindow)
-        self.centralwidget.setObjectName("centralwidget")
-        
-        self.selectImageButton = QtWidgets.QPushButton(self.centralwidget)
-        self.selectImageButton.setGeometry(QtCore.QRect(20, 10, 111, 31))
-        self.selectImageButton.setObjectName("selectImageButton")
-        self.selectImageButton.clicked.connect(self.selectpath)
-        
-        self.imgPathLabel = QtWidgets.QLabel(self.centralwidget)
-        self.imgPathLabel.setGeometry(QtCore.QRect(20, 50, 681, 21))
-        self.imgPathLabel.setObjectName("imgPathLabel")
-        
-        self.analyseButton = QtWidgets.QPushButton(self.centralwidget)
-        self.analyseButton.setGeometry(QtCore.QRect(20, 90, 75, 23))
-        self.analyseButton.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.analyseButton.setObjectName("analyseButton")
-        self.analyseButton.clicked.connect(self.do_foxnews)
-        
-        self.analyseButton2 = QtWidgets.QPushButton(self.centralwidget)
-        self.analyseButton2.setGeometry(QtCore.QRect(100, 90, 75, 23))
-        self.analyseButton2.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.analyseButton2.setObjectName("analyseButton2")
-        self.analyseButton2.clicked.connect(self.do_nyt)
-        
-        self.analyseButton3 = QtWidgets.QPushButton(self.centralwidget)
-        self.analyseButton3.setGeometry(QtCore.QRect(180, 90, 75, 23))
-        self.analyseButton3.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.analyseButton3.setObjectName("analyseButton3")
-        self.analyseButton3.clicked.connect(self.do_facebook)
-        
-        self.analyseButton4 = QtWidgets.QPushButton(self.centralwidget)
-        self.analyseButton4.setGeometry(QtCore.QRect(260, 90, 75, 23))
-        self.analyseButton4.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.analyseButton4.setObjectName("analyseButton3")
-        self.analyseButton4.clicked.connect(self.do_twitter)
-        
-        self.analyseSep = QtWidgets.QFrame(self.centralwidget)
-        self.analyseSep.setGeometry(QtCore.QRect(20, 70, 201, 16))
-        self.analyseSep.setFrameShadow(QtWidgets.QFrame.Plain)
-        self.analyseSep.setLineWidth(1)
-        self.analyseSep.setFrameShape(QtWidgets.QFrame.HLine)
-        self.analyseSep.setObjectName("analyseSep")
-        
-        self.resultSep = QtWidgets.QFrame(self.centralwidget)
-        self.resultSep.setGeometry(QtCore.QRect(20, 120, 201, 16))
-        self.resultSep.setFrameShadow(QtWidgets.QFrame.Plain)
-        self.resultSep.setLineWidth(1)
-        self.resultSep.setFrameShape(QtWidgets.QFrame.HLine)
-        self.resultSep.setObjectName("resultSep")
-        
-        self.label = QtWidgets.QLabel(self.centralwidget)
-        self.label.setGeometry(QtCore.QRect(20, 140, 211, 161))
-        self.label.setScaledContents(False)
-        self.label.setAlignment(QtCore.Qt.AlignLeading|QtCore.Qt.AlignLeft|QtCore.Qt.AlignTop)
-        self.label.setObjectName("label")
-        self.label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-
-        MainWindow.setCentralWidget(self.centralwidget)
-        
-        self.menubar = QtWidgets.QMenuBar(MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 547, 22))
-        self.menubar.setObjectName("menubar")
-        MainWindow.setMenuBar(self.menubar)
-        
-        self.statusbar = QtWidgets.QStatusBar(MainWindow)
-        self.statusbar.setObjectName("statusbar")
-        MainWindow.setStatusBar(self.statusbar)
-
-        self.retranslateUi(MainWindow)
-        QtCore.QMetaObject.connectSlotsByName(MainWindow)
-
-    def retranslateUi(self, MainWindow):
-        _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "Pluto"))
-        self.selectImageButton.setText(_translate("MainWindow", "Select Image..."))
-        self.imgPathLabel.setText(_translate("MainWindow", "Selected Image: [null]"))
-        self.analyseButton.setText(_translate("MainWindow", "Fox News"))
-        self.analyseButton2.setText(_translate("MainWindow", "NYT"))
-        self.analyseButton3.setText(_translate("MainWindow", "FB"))
-        self.analyseButton4.setText(_translate("MainWindow", "Twitter"))
-        self.label.setText(_translate("MainWindow", "Result:"))
-    
-    def selectpath(self):
-        userInput, okPressed = QInputDialog.getText(self, "Input Image Path", "Please enter the path to your image:")
-        if okPressed:
-            self.imgPathLabel.setText("Selected Image: " + userInput)
-            # self.photo.setPixmap(QtGui.QPixmap(userInput))
-            self.img_path = userInput
-        self.update()
-    
-    def do_foxnews(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        try:
-            img = img = pl.read_image(self.img_path)
-            author, subtitle, headline, pubsplit, dotsplit, msg = fox_analyse(img)
-            self.label.setText("Result: \nAuthor: " + author + "\nSubtitle: " + subtitle + "\nHeadline: " + headline + "\nPlublished: " + pubsplit + "\nTopic: " + dotsplit)
-        except Exception as e:
-            self.label.setText("Error: \n" + str(e))
-            print(e)
-        self.update()
-    
-    def do_facebook(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        try:
-            img = img = pl.read_image(self.img_path)
-            author, date, body_text, engagement_text = pl.Facebook(img).analyse()
-            self.label.setText("Result: \nAuthor: " + author + "\nPublished: " + date + "\nPost: " + body_text + "\nEngagement: " + engagement_text)
-        except Exception as e:
-            self.label.setText("Error: \n" + str(e))
-            print(e)
-        self.update()
-    
-    def do_twitter(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        try:
-            img = img = pl.read_image(self.img_path)
-            name, handle, text = pl.Twitter(img).analyse()
-            self.label.setText("Result: \nName: " + name + "\nHandle: " + handle + "\nText: " + text)
-        except Exception as e:
-            self.label.setText("Error: \n" + str(e))
-            print(e)
-        self.update()
-    
-    def do_nyt(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        try:
-            img = img = pl.read_image(self.img_path)
-            nyt = pl.NYT(img)
-            headline, subtitle = nyt.analyse()
-            self.label.setText("Result: \nHeadline: " + headline + "\nSubtitle: " + subtitle)
-        except Exception as e:
-            self.label.setText("Error: \n" + str(e))
-            print(e)
-        self.update()
-
-    def update(self):
-        self.centralwidget.adjustSize()
-        self.imgPathLabel.adjustSize()
-        self.label.adjustSize()
 
 def fox_analyse(img, display=False):
     msg = ""
@@ -282,6 +134,287 @@ def fox_analyse(img, display=False):
     subtitle = " ".join(subtitle_list)
     
     return author, subtitle, headline, pubsplit, dotsplit, msg
+
+class Ui_MainWindow(QMainWindow):
+    def setupUi(self, MainWindow):
+        MainWindow.setObjectName("MainWindow")
+        MainWindow.resize(547, 349)
+        self.setWindowIcon(QtGui.QIcon("D:\\Codeing\\Pluto-Nightly\\icon.png"))
+        self.centralwidget = QtWidgets.QWidget(MainWindow)
+        self.centralwidget.setObjectName("centralwidget")
+        
+        self.selectImageButton = QtWidgets.QPushButton(self.centralwidget)
+        self.selectImageButton.setGeometry(QtCore.QRect(20, 10, 120, 31))
+        self.selectImageButton.setObjectName("selectImageButton")
+        self.selectImageButton.clicked.connect(self.selectpath)
+        
+        self.grabFromClipboardButton = QtWidgets.QPushButton(self.centralwidget)
+        self.grabFromClipboardButton.setGeometry(QtCore.QRect(155, 10, 125, 31))
+        self.grabFromClipboardButton.setObjectName("grabClipboardButton")
+        self.grabFromClipboardButton.clicked.connect(self.grab_clipboard)
+        
+        self.imgPathLabel = QtWidgets.QLabel(self.centralwidget)
+        self.imgPathLabel.setGeometry(QtCore.QRect(20, 50, 681, 21))
+        self.imgPathLabel.setObjectName("imgPathLabel")
+        
+        self.analyseButton = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton.setGeometry(QtCore.QRect(20, 90, 75, 25))
+        self.analyseButton.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton.setObjectName("analyseButton")
+        self.analyseButton.clicked.connect(self.do_foxnews)
+        
+        self.analyseButton2 = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton2.setGeometry(QtCore.QRect(100, 90, 75, 25))
+        self.analyseButton2.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton2.setObjectName("analyseButton2")
+        self.analyseButton2.clicked.connect(self.do_nyt)
+        
+        self.analyseButton3 = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton3.setGeometry(QtCore.QRect(180, 90, 75, 25))
+        self.analyseButton3.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton3.setObjectName("analyseButton3")
+        self.analyseButton3.clicked.connect(self.do_facebook)
+        
+        self.analyseButton4 = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton4.setGeometry(QtCore.QRect(260, 90, 75, 25))
+        self.analyseButton4.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton4.setObjectName("analyseButton3")
+        self.analyseButton4.clicked.connect(self.do_twitter)
+        
+        self.analyseButton5 = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton5.setGeometry(QtCore.QRect(340, 90, 75, 25))
+        self.analyseButton5.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton5.setObjectName("analyseButton5")
+        self.analyseButton5.clicked.connect(self.do_wpost)
+        
+        self.analyseButton6 = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton6.setGeometry(QtCore.QRect(20, 120, 75, 25))
+        self.analyseButton6.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton6.setObjectName("analyseButton6")
+        self.analyseButton6.clicked.connect(self.do_welt)
+        
+        self.analyseButton7 = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton7.setGeometry(QtCore.QRect(100, 120, 100, 25))
+        self.analyseButton7.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton7.setObjectName("analyseButton7")
+        self.analyseButton7.clicked.connect(self.do_tagesschau)
+        
+        self.analyseButton8 = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton8.setGeometry(QtCore.QRect(205, 120, 75, 25))
+        self.analyseButton8.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton8.setObjectName("analyseButton8")
+        self.analyseButton8.clicked.connect(self.do_discord)
+        
+        self.analyseButton9 = QtWidgets.QPushButton(self.centralwidget)
+        self.analyseButton9.setGeometry(QtCore.QRect(285, 120, 110, 25))
+        self.analyseButton9.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.analyseButton9.setObjectName("analyseButton9")
+        self.analyseButton9.clicked.connect(self.do_fbm)
+        
+        self.analyseSep = QtWidgets.QFrame(self.centralwidget)
+        self.analyseSep.setGeometry(QtCore.QRect(20, 70, 201, 16))
+        self.analyseSep.setFrameShadow(QtWidgets.QFrame.Plain)
+        self.analyseSep.setLineWidth(1)
+        self.analyseSep.setFrameShape(QtWidgets.QFrame.HLine)
+        self.analyseSep.setObjectName("analyseSep")
+        
+        self.resultSep = QtWidgets.QFrame(self.centralwidget)
+        self.resultSep.setGeometry(QtCore.QRect(20, 150, 201, 16))
+        self.resultSep.setFrameShadow(QtWidgets.QFrame.Plain)
+        self.resultSep.setLineWidth(1)
+        self.resultSep.setFrameShape(QtWidgets.QFrame.HLine)
+        self.resultSep.setObjectName("resultSep")
+        
+        self.actionSearch = QtWidgets.QPushButton(self.centralwidget)
+        self.actionSearch.setGeometry(QtCore.QRect(20, 170, 110, 25))
+        self.actionSearch.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.actionSearch.setObjectName("actionSearch")
+        self.actionSearch.clicked.connect(self.nyt_seach)
+        
+        self.actionSearch = QtWidgets.QPushButton(self.centralwidget)
+        self.actionSearch.setGeometry(QtCore.QRect(20, 170, 110, 25))
+        self.actionSearch.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.actionSearch.setObjectName("actionSearch")
+        self.actionSearch.clicked.connect(self.nyt_seach)
+        
+        self.googleSearch = QtWidgets.QPushButton(self.centralwidget)
+        self.googleSearch.setGeometry(QtCore.QRect(150, 170, 110, 25))
+        self.googleSearch.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.googleSearch.setObjectName("googleSearch")
+        self.googleSearch.clicked.connect(self.nyt_seach)
+        
+        self.actionJSON = QtWidgets.QPushButton(self.centralwidget)
+        self.actionJSON.setGeometry(QtCore.QRect(280, 170, 110, 25))
+        self.actionJSON.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.actionJSON.setObjectName("actionJSON")
+        self.actionJSON.clicked.connect(self.nyt_seach)
+        
+        self.actionSep = QtWidgets.QFrame(self.centralwidget)
+        self.actionSep.setGeometry(QtCore.QRect(20, 200, 201, 16))
+        self.actionSep.setFrameShadow(QtWidgets.QFrame.Plain)
+        self.actionSep.setLineWidth(1)
+        self.actionSep.setFrameShape(QtWidgets.QFrame.HLine)
+        self.actionSep.setObjectName("actionSep")
+        
+        self.label = QtWidgets.QLabel(self.centralwidget)
+        self.label.setGeometry(QtCore.QRect(20, 220, 211, 161))
+        self.label.setScaledContents(False)
+        self.label.setAlignment(QtCore.Qt.AlignLeading|QtCore.Qt.AlignLeft|QtCore.Qt.AlignTop)
+        self.label.setObjectName("label")
+        self.label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+
+        MainWindow.setCentralWidget(self.centralwidget)
+        
+        self.menubar = QtWidgets.QMenuBar(MainWindow)
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 547, 22))
+        self.menubar.setObjectName("menubar")
+        MainWindow.setMenuBar(self.menubar)
+        
+        self.statusbar = QtWidgets.QStatusBar(MainWindow)
+        self.statusbar.setObjectName("statusbar")
+        MainWindow.setStatusBar(self.statusbar)
+
+        self.retranslateUi(MainWindow)
+        QtCore.QMetaObject.connectSlotsByName(MainWindow)
+
+    def retranslateUi(self, MainWindow):
+        _translate = QtCore.QCoreApplication.translate
+        MainWindow.setWindowTitle(_translate("MainWindow", "Pluto"))
+        self.selectImageButton.setText(_translate("MainWindow", "Select Image..."))
+        self.grabFromClipboardButton.setText(_translate("MainWindow", "use clipboard..."))
+        self.imgPathLabel.setText(_translate("MainWindow", "Selected Image: [null]"))
+        self.analyseButton.setText(_translate("MainWindow", "Fox News"))
+        self.analyseButton2.setText(_translate("MainWindow", "NYT"))
+        self.analyseButton3.setText(_translate("MainWindow", "FB"))
+        self.analyseButton4.setText(_translate("MainWindow", "Twitter"))
+        self.analyseButton5.setText(_translate("MainWindow", "W Post"))
+        self.analyseButton6.setText(_translate("MainWindow", "WELT"))
+        self.analyseButton7.setText(_translate("MainWindow", "Tagesschau"))
+        self.analyseButton8.setText(_translate("MainWindow", "Discord"))
+        self.analyseButton9.setText(_translate("MainWindow", "FB Messenger"))
+        self.actionSearch.setText(_translate("MainWindow", "NYT Search"))
+        self.googleSearch.setText(_translate("MainWindow", "Open Google"))
+        self.actionJSON.setText(_translate("MainWindow", "Save as JSON"))
+        self.label.setText(_translate("MainWindow", "Result:"))
+    
+    def selectpath(self):
+        userInput, okPressed = QInputDialog.getText(self, "Input Image Path", "Please enter the path to your image:")
+        if okPressed:
+            self.imgPathLabel.setText("Selected Image: " + userInput)
+            # self.photo.setPixmap(QtGui.QPixmap(userInput))
+            self.img_path = userInput
+        self.update()
+    
+    def grab_clipboard(self):
+        from PIL import ImageGrab
+        img = ImageGrab.grabclipboard().convert("RGB")
+        img = np.array(img)
+        self.img_path = img
+        self.imgPathLabel.setText("Selected Image: clipboard content")
+    
+    def do_foxnews(self):
+        # print("Analysed pressed!")
+        # print(self.img_path)
+        # try:
+        img = img = pl.read_image(self.img_path)
+        author, subtitle, headline, pubsplit, dotsplit, msg = fox_analyse(img)
+        self.label.setText("Result: \nAuthor: " + author + "\nSubtitle: " + subtitle + "\nHeadline: " + headline + "\nPlublished: " + pubsplit + "\nTopic: " + dotsplit)
+        # except Exception as e:
+        #     self.label.setText("Error: \n" + str(e))
+        #     print(e)
+        self.update()
+    
+    def do_facebook(self):
+        # print("Analysed pressed!")
+        # print(self.img_path)
+        # try:
+        img = img = pl.read_image(self.img_path)
+        author, date, body_text, engagement_text = pl.Facebook(img).analyse()
+        self.label.setText("Result: \nAuthor: " + author + "\nPublished: " + date + "\nPost: " + body_text + "\nEngagement: " + engagement_text)
+        # except Exception as e:
+        #     self.label.setText("Error: \n" + str(e))
+        #     print(e)
+        self.update()
+    
+    def do_twitter(self):
+        # print("Analysed pressed!")
+        # print(self.img_path)
+        # try:
+        img = img = pl.read_image(self.img_path)
+        name, handle, text = pl.Twitter(img).analyse()
+        self.label.setText("Result: \nName: " + name + "\nHandle: " + handle + "\nText: " + text)
+        #     self.label.setText("Error: \n" + str(e))
+        #     print(e)
+        self.update()
+    
+    def do_nyt(self):
+        # print("Analysed pressed!")
+        # print(self.img_path)
+        # try:
+        img = img = pl.read_image(self.img_path)
+        nyt = pl.NYT(img)
+        headline, subtitle = nyt.analyse()
+        self.search_term = headline
+        self.label.setText("Result: \nHeadline: " + headline + "\nSubtitle: " + subtitle)
+        # except Exception as e:
+        #     self.label.setText("Error: \n" + str(e))
+        #     print(e)
+        self.update()
+    
+    def nyt_seach(self, query=str):
+        pl.NYT(None).search(self.search_term)
+
+    def do_wpost(self):
+        # print("Analysed pressed!")
+        # print(self.img_path)
+        # try:
+        img = img = pl.read_image(self.img_path)
+        wpost = pl.WPost(img)
+        category, headline, author, date, body = wpost.analyse()
+        self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nAuthor(s): " + author + "\nPublished: " + date + "\nContent: " + body)
+        # except Exception as e:
+        #     self.label.setText("Error: \n" + str(e))
+        #     print(e)
+        self.update()
+    
+    def do_welt(self):
+        img = img = pl.read_image(self.img_path)
+        welt = pl.WELT(img)
+        headline, category, date = welt.analyse()
+        self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date)
+        self.update()
+    
+    def do_tagesschau(self):
+        img = img = pl.read_image(self.img_path)
+        tschau = pl.Tagesschau(img)
+        date, headline, body, category = tschau.analyse()
+        self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        self.update()
+        
+    def do_discord(self):
+        img = img = pl.read_image(self.img_path)
+        discord = pl.Discord(img)
+        return_list = discord.analyse()
+        out = ""
+        for msg in return_list:
+            out += str(msg) + "\n"
+        self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        self.update()
+    
+    def do_fbm(self):
+        img = img = pl.read_image(self.img_path)
+        fbm = pl.FBM(img)
+        return_list = fbm.analyse()
+        out = ""
+        for msg in return_list:
+            out += str(msg) + "\n"
+        self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        self.update()
+
+    def update(self):
+        self.centralwidget.adjustSize()
+        self.imgPathLabel.adjustSize()
+        self.label.adjustSize()
 
 if __name__ == "__main__":
     import sys
