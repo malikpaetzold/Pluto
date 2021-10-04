@@ -267,8 +267,6 @@ def google(query: str):
 class PlutoObject:
     def __init__(self, img: np.ndarray):
         self.img = img
-        self.use_tesseract = True
-        self.tesseract_path = "C:/Program Files/Tesseract-OCR/tesseract.exe"
         self.use_easyocr = False
 
     def load_model(self, path, model, device: Literal["cuda", "cpu"]):
@@ -329,7 +327,7 @@ class PlutoObject:
         return tensor.cpu().numpy().reshape(img_size, img_size).astype(dtype)
 
     def ocr(self, image=None, switch_to_tesseract=False):  # -> str
-        """Preforms OCR on a given image, using ether Tesseract or EasyOCR
+        """Preforms OCR on a given image, using EasyOCR
         
         Args:
             image: np.ndarray of the to be treated image.
@@ -339,31 +337,16 @@ class PlutoObject:
         
         """
         if image is None: image = self.img
-        if switch_to_tesseract:#self.use_tesseract:
-            if self.tesseract_path == "": print("Pluto WARNING - Please check if tesseract_path has been set.")
-            from pytesseract import pytesseract
-            try:
-                pytesseract.tesseract_cmd = self.tesseract_path
-                text = pytesseract.image_to_string(image)
-            except Exception as e:
-                print("Pluto WARNING - Error while performing OCR: ", e)
-                text = ""
-            return text
-        else:#if self.use_easyocr:
-            # import easyocr
-            try:
-                # reader = easyocr.Reader(['en'])
-                ocr_raw_result = reader.readtext(image, detail=0)
-            except Exception as e:
-                print("Pluto WARNING - Error while performing OCR: ", e)
-                ocr_raw_result = [""]
-            out = ""
-            for word in ocr_raw_result:
-                out += " " + word
-            return out
-
-        print("Pluto WARNING - Check if use_tesseract and use_easyocr attributes are set.")
-        return None
+        try:
+            # reader = easyocr.Reader(['en'])
+            ocr_raw_result = reader.readtext(image, detail=0)
+        except Exception as e:
+            print("Pluto WARNING - Error while performing OCR: ", e)
+            ocr_raw_result = [""]
+        out = ""
+        for word in ocr_raw_result:
+            out += " " + word
+        return out
 
     def expand_to_rows(self, image: np.ndarray, full=False, value=200):  # -> np.ndarray
         """
@@ -739,8 +722,8 @@ class Facebook(PlutoObject):
         
         self.insert, self.engagement = None, None
         
-        if len(splits) > 1: self.insert = splits[1]
-        if len(splits) > 2: self.engagement = splits[2]
+        if len(splits) > 1 and splits[1] is not None: self.insert = splits[1]
+        if len(splits) > 2 and splits[2] is not None: self.engagement = splits[2]
         
         date = self.header[int(self.header.shape[0] / 2) :]
         header = self.header[: int(self.header.shape[0] / 2)]
@@ -797,6 +780,14 @@ class Facebook(PlutoObject):
         if exists2:
             insert = bottom_og[:j]
             engagement = bottom_og[j:]
+        
+        if insert is not None and self.classify(insert) == 1:
+            ts, ins = top.shape, insert.shape
+            temp = np.zeros((ts[0] + ins[0], ts[1], ts[2]), np.uint8)
+            temp[:ts[0]] = top
+            temp[ts[0]:] = insert
+            top = temp
+            insert = None
         
         # show_image(top)
         # show_image(insert)
@@ -944,13 +935,13 @@ class Facebook(PlutoObject):
         return out, full
     
     def classify(self, img=None):
-        """Header or Text?
+        """Image or still part of text?
         """
         if img is None: img = self.img
         img = to_grayscale(img)
         
-        net = ConvNet(1, 6, 12, 30, 20, 2)
-        net.load_state_dict(torch.load("models/fbclss2.pt"))
+        net = ConvNet(1, 6, 12, 100, 20, 2)
+        net.load_state_dict(torch.load("models/general_1.pt"))
         
         device = self.determine_device()
         net.to(device)
@@ -1019,9 +1010,9 @@ class Facebook(PlutoObject):
         """
         if img is None: img = self.img
         dim = img.shape
-        img = img[:int(dim[0]*0.1),:int(dim[0]*0.02)]
+        img = img[:int(dim[0]*0.1),:int(dim[0]*0.015)]
         avg = np.average(img)
-        return avg < 240
+        return avg < 220
 
     def split_legacy(self, img=None, darkmode=None): # -> np.ndarray
         """---
@@ -1151,16 +1142,16 @@ class Facebook(PlutoObject):
     def search(self, query: str):
         """Searches a query with Facebook's search function. Opens result in browser window.
         """
-        link = "https://www.nytimes.com/search?query="
+        link = "https://www.facebook.com/search/top/?q="
         query.replace(" ", "+")
         
         webbrowser.open((link + query))
     
     def clean_top(self, img=None):
-        """'Cleans' the top excerpt by removing the profile picture
-        ---
+        """---
         DEPRECATED
         ---
+        'Cleans' the top excerpt by removing the profile picture
         """
         if img is None: img = self.top
 
@@ -1491,6 +1482,7 @@ class NYT(PlutoObject):
     def __init__(self, img: np.ndarray):
         super().__init__(img)
         self.header_img = None
+        self.headline = None
     
     def header(self, img=None, non_header=False):
         """Isolates the headline from an article, based on color
@@ -1610,6 +1602,7 @@ class NYT(PlutoObject):
         """
         analyse_img = img
         if analyse_img is None: analyse_img = self.img
+        
         sliced_result = self.slice(analyse_img)
         top, color_images, bottomnp = None, None, None
         if len(sliced_result) == 1: top = sliced_result[0]
@@ -1635,7 +1628,7 @@ class NYT(PlutoObject):
         # show_image(body)
         # return head, body
         
-        headline = self.ocr_cleanup(self.ocr(head))
+        self.headline = self.ocr_cleanup(self.ocr(head))
         author = self.author(bottom)
         # print(headline)
         
@@ -1643,7 +1636,7 @@ class NYT(PlutoObject):
         subt = self.suber(np.array(body))
         subtitle = self.ocr_cleanup(self.ocr(subt))
         
-        return headline, subtitle, author
+        return self.headline, subtitle, author
     
     def slice(self, img=None):
         """Slices image
@@ -1682,10 +1675,33 @@ class NYT(PlutoObject):
                     minpix, maxpix = np.min(pix), np.max(pix)
                     difference = maxpix - minpix
                     if difference > 10: difflen += 1
-                    if difflen > 50: return top, temp, parts[i+1:]
+                    if difflen > 50:
+                        if self.classify(temp) == 0: return top, temp, parts[i+1:]
             top += temp.tolist()
         
         return [top]
+    
+    def classify(self, img=None):
+        """Image or still part of text?
+        """
+        if img is None: img = self.img
+        img = to_grayscale(img)
+        
+        net = ConvNet(1, 6, 12, 100, 20, 2)
+        net.load_state_dict(torch.load("models/general_1.pt"))
+        
+        device = self.determine_device()
+        net.to(device)
+        
+        tnsr = self.to_tensor(img, 224, torch.float32, device, 1)
+        
+        net.eval()
+        with torch.no_grad():
+            net_out = net(tnsr.to(device))[0]
+            predicted_class = torch.argmax(net_out)
+        result = predicted_class.cpu().numpy()
+        
+        return result
     
     def author(self, img=None):
         """Iso author
@@ -1722,7 +1738,8 @@ class NYT(PlutoObject):
         import json
         result = self.analyse(img)
         
-        jasoon = {  "source": "News Article",
+        jasoon = {  "source": "New York Times",
+                    "category": "News Article",
                     "article": {
                         "organisation": "New York Times",
                         "headline": result[0],
@@ -1743,6 +1760,9 @@ class NYT(PlutoObject):
         query.replace(" ", "+")
         
         webbrowser.open((link + query))
+    
+    def open_search(self):
+        self.search(self.headline)
 
 class Tagesschau(PlutoObject):
     def __init__(self, img: np.ndarray):

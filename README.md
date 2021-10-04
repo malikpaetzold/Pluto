@@ -16,9 +16,10 @@ media posts, chat histories, and news pages. Current features of the master bran
 underlying helper functions for OCR and image transforms. Take a look at example.py to see how the current version of Pluto can be used.
 
 # Quickstart
-Download ```pluto.py``` or ```pluto_light.py``` (Pluto is not yet available via pip). When using ```pluto.py```, you will also need to download the models folder. Head to 
-downloads.patzold.io and download the models.zip file. Then un-zip it and place it in the same directory as ```pluto.py```. ```example.py``` has a few code examples on how to use 
-the different features.
+Download ```pluto.py``` and the ```models``` folder. Make sure you put them is the same directory. After installing all dependencies, you can use Pluto as a CLI or Python Library. For example:
 
-Please make sure to have all the necessary dependencies installed. ```pluto_light.py``` requires Matplotlib, Cv2, NumPy and PyTesseract, ```pluto.py``` additionally also PyTorch 
-and EasyOCR.
+```python pluto.py -i NYT_Example_3.jpg -o nytout.json -c NYT```
+
+Will run the file NYT_Example_3.jpg with the NYT class and save the output as nytout.json. Type ```python pluto.py -h``` for more details.
+
+You can also import ```pluto.py``` as a library, and use all of Pluto's functions & methods. For this variant I highly recommend going through ```example.ipynb```.

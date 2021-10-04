@@ -1,3 +1,4 @@
+from re import S
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QApplication, QMainWindow, QInputDialog
 
@@ -139,7 +140,9 @@ class Ui_MainWindow(QMainWindow):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(547, 349)
-        self.setWindowIcon(QtGui.QIcon("D:\\Codeing\\Pluto-Nightly\\icon.png"))
+        self.last_action = None
+        
+        self.setWindowIcon(QtGui.QIcon("icon.png"))
         self.centralwidget = QtWidgets.QWidget(MainWindow)
         self.centralwidget.setObjectName("centralwidget")
         
@@ -229,25 +232,25 @@ class Ui_MainWindow(QMainWindow):
         self.actionSearch.setGeometry(QtCore.QRect(20, 170, 110, 25))
         self.actionSearch.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.actionSearch.setObjectName("actionSearch")
-        self.actionSearch.clicked.connect(self.nyt_seach)
+        self.actionSearch.clicked.connect(self.nyt_search)
+        
+        self.actionJSON = QtWidgets.QPushButton(self.centralwidget)
+        self.actionJSON.setGeometry(QtCore.QRect(20, 170, 110, 25))
+        self.actionJSON.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.actionJSON.setObjectName("actionJSON")
+        self.actionJSON.clicked.connect(self.save_json)
         
         self.actionSearch = QtWidgets.QPushButton(self.centralwidget)
-        self.actionSearch.setGeometry(QtCore.QRect(20, 170, 110, 25))
+        self.actionSearch.setGeometry(QtCore.QRect(280, 170, 110, 25))
         self.actionSearch.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.actionSearch.setObjectName("actionSearch")
-        self.actionSearch.clicked.connect(self.nyt_seach)
+        self.actionSearch.clicked.connect(self.nyt_search)
         
         self.googleSearch = QtWidgets.QPushButton(self.centralwidget)
         self.googleSearch.setGeometry(QtCore.QRect(150, 170, 110, 25))
         self.googleSearch.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.googleSearch.setObjectName("googleSearch")
-        self.googleSearch.clicked.connect(self.nyt_seach)
-        
-        self.actionJSON = QtWidgets.QPushButton(self.centralwidget)
-        self.actionJSON.setGeometry(QtCore.QRect(280, 170, 110, 25))
-        self.actionJSON.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.actionJSON.setObjectName("actionJSON")
-        self.actionJSON.clicked.connect(self.nyt_seach)
+        self.googleSearch.clicked.connect(self.google_search)
         
         self.actionSep = QtWidgets.QFrame(self.centralwidget)
         self.actionSep.setGeometry(QtCore.QRect(20, 200, 201, 16))
@@ -292,9 +295,9 @@ class Ui_MainWindow(QMainWindow):
         self.analyseButton7.setText(_translate("MainWindow", "Tagesschau"))
         self.analyseButton8.setText(_translate("MainWindow", "Discord"))
         self.analyseButton9.setText(_translate("MainWindow", "FB Messenger"))
-        self.actionSearch.setText(_translate("MainWindow", "NYT Search"))
-        self.googleSearch.setText(_translate("MainWindow", "Open Google"))
         self.actionJSON.setText(_translate("MainWindow", "Save as JSON"))
+        self.actionSearch.setText(_translate("MainWindow", "---"))
+        self.googleSearch.setText(_translate("MainWindow", "Open Google"))
         self.label.setText(_translate("MainWindow", "Result:"))
     
     def selectpath(self):
@@ -313,71 +316,50 @@ class Ui_MainWindow(QMainWindow):
         self.imgPathLabel.setText("Selected Image: clipboard content")
     
     def do_foxnews(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        # try:
+        self.last_action = "fox"
         img = img = pl.read_image(self.img_path)
         author, subtitle, headline, pubsplit, dotsplit, msg = fox_analyse(img)
         self.label.setText("Result: \nAuthor: " + author + "\nSubtitle: " + subtitle + "\nHeadline: " + headline + "\nPlublished: " + pubsplit + "\nTopic: " + dotsplit)
-        # except Exception as e:
-        #     self.label.setText("Error: \n" + str(e))
-        #     print(e)
         self.update()
     
     def do_facebook(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        # try:
+        self.last_action = "fb"
         img = img = pl.read_image(self.img_path)
         author, date, body_text, engagement_text = pl.Facebook(img).analyse()
-        self.label.setText("Result: \nAuthor: " + author + "\nPublished: " + date + "\nPost: " + body_text + "\nEngagement: " + engagement_text)
-        # except Exception as e:
-        #     self.label.setText("Error: \n" + str(e))
-        #     print(e)
+        self.label.setText("Result: \nAuthor: " + author + "\nPublished: " + date + "\nPost: " + body_text + "\nEngagement: " + str(engagement_text))
         self.update()
     
     def do_twitter(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        # try:
-        img = img = pl.read_image(self.img_path)
-        name, handle, text = pl.Twitter(img).analyse()
-        self.label.setText("Result: \nName: " + name + "\nHandle: " + handle + "\nText: " + text)
-        #     self.label.setText("Error: \n" + str(e))
-        #     print(e)
+        # img = img = pl.read_image(self.img_path)
+        # name, handle, text = pl.Twitter(img).analyse()
+        # self.label.setText("Result: \nName: " + name + "\nHandle: " + handle + "\nText: " + text)
+        self.label.setText("Twitter feature is currently unavailable due to update lag.")
         self.update()
     
     def do_nyt(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        # try:
+        self.last_action = "nyt"
+        _translate = QtCore.QCoreApplication.translate
+        self.actionSearch.setText(_translate("MainWindow", "NYT Search"))
         img = img = pl.read_image(self.img_path)
         nyt = pl.NYT(img)
-        headline, subtitle = nyt.analyse()
+        headline, subtitle, author = nyt.analyse()
         self.search_term = headline
-        self.label.setText("Result: \nHeadline: " + headline + "\nSubtitle: " + subtitle)
-        # except Exception as e:
-        #     self.label.setText("Error: \n" + str(e))
-        #     print(e)
+        self.label.setText("Result: \nHeadline: " + str(headline) + "\nSubtitle: " + S(subtitle) + "\nAuthor: " + str(author))
         self.update()
     
-    def nyt_seach(self, query=str):
+    def nyt_search(self, query=str):
         pl.NYT(None).search(self.search_term)
 
     def do_wpost(self):
-        # print("Analysed pressed!")
-        # print(self.img_path)
-        # try:
+        self.last_action = "wpost"
         img = img = pl.read_image(self.img_path)
         wpost = pl.WPost(img)
         category, headline, author, date, body = wpost.analyse()
         self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nAuthor(s): " + author + "\nPublished: " + date + "\nContent: " + body)
-        # except Exception as e:
-        #     self.label.setText("Error: \n" + str(e))
-        #     print(e)
         self.update()
     
     def do_welt(self):
+        self.last_action = "welt"
         img = img = pl.read_image(self.img_path)
         welt = pl.WELT(img)
         headline, category, date = welt.analyse()
@@ -385,6 +367,7 @@ class Ui_MainWindow(QMainWindow):
         self.update()
     
     def do_tagesschau(self):
+        self.last_action = "tag"
         img = img = pl.read_image(self.img_path)
         tschau = pl.Tagesschau(img)
         date, headline, body, category = tschau.analyse()
@@ -392,6 +375,7 @@ class Ui_MainWindow(QMainWindow):
         self.update()
         
     def do_discord(self):
+        self.last_action = "discord"
         img = img = pl.read_image(self.img_path)
         discord = pl.Discord(img)
         return_list = discord.analyse()
@@ -401,7 +385,19 @@ class Ui_MainWindow(QMainWindow):
         self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
         self.update()
     
+    def do_whatsapp(self):
+        self.last_action = "whatsapp"
+        img = img = pl.read_image(self.img_path)
+        whatsapp = pl.WhatsApp(img)
+        return_list = whatsapp.analyse()
+        out = ""
+        for msg in return_list:
+            out += str(msg) + "\n"
+        self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        self.update()
+    
     def do_fbm(self):
+        self.last_action = "fbm"
         img = img = pl.read_image(self.img_path)
         fbm = pl.FBM(img)
         return_list = fbm.analyse()
@@ -410,6 +406,36 @@ class Ui_MainWindow(QMainWindow):
             out += str(msg) + "\n"
         self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
         self.update()
+    
+    def save_json(self):
+        userInput, okPressed = QInputDialog.getText(self, "Output File Path", "Please enter the path for the output file:")
+        print(userInput[-5:])
+        print(userInput)
+        if okPressed:
+            if userInput[-5:] != ".json":
+                print("output path is not a .json file!")
+                return
+            
+            img = img = pl.read_image(self.img_path)
+            if self.last_action == "fb": pl.Facebook(img).to_json(img, userInput)
+            elif self.last_action == "nyt": pl.NYT(img).to_json(img, userInput)
+            elif self.last_action == "discord": pl.Discord(img).to_json(img, userInput)
+            elif self.last_action == "whatsapp": pl.WhatsApp(img).to_json(img, userInput)
+            elif self.last_action == "fbm": pl.FBM(img).to_json(img, userInput)
+            elif self.last_action == "wpost": pl.WPost(img).to_json(img, userInput)
+            elif self.last_action == "welt": pl.WELT(img).to_json(img, userInput)
+            elif self.last_action == "fox": pl.FoxNews(img).to_json(img, userInput)
+    
+    def google_search(self):
+        pass
+        # if self.last_action == "fb": pl.Facebook(img).to_json(img, userInput)
+        # elif self.last_action == "nyt": pl.NYT(img).to_json(img, userInput)
+        # elif self.last_action == "discord": pl.Discord(img).to_json(img, userInput)
+        # elif self.last_action == "whatsapp": pl.WhatsApp(img).to_json(img, userInput)
+        # elif self.last_action == "fbm": pl.FBM(img).to_json(img, userInput)
+        # elif self.last_action == "wpost": pl.WPost(img).to_json(img, userInput)
+        # elif self.last_action == "welt": pl.WELT(img).to_json(img, userInput)
+        # elif self.last_action == "fox": pl.FoxNews(img).to_json(img, userInput)
 
     def update(self):
         self.centralwidget.adjustSize()
