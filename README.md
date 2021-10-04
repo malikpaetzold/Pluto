@@ -16,10 +16,12 @@ media posts, chat histories, and news pages. Current features of the master bran
 underlying helper functions for OCR and image transforms. Take a look at example.py to see how the current version of Pluto can be used.
 
 # Quickstart
-Download ```pluto.py``` and the ```models``` folder. Make sure you put them is the same directory. You can now use Pluto as a CLI or PYthon Library. For example:
+Download ```pluto.py``` and the ```models``` folder. Make sure you put them is the same directory. After installing all dependencies, you can use Pluto as a CLI or Python Library. For example:
 
 ```python pluto.py -i NYT_Example_3.jpg -o nytout.json -c NYT```
 
 Will run the file NYT_Example_3.jpg with the NYT class and save the output as nytout.json. Type ```python pluto.py -h``` for more details.
 
-You can also import ```pluto.py``` as a library (see ```example.py```), and use all of Pluto's functions & methods.
+You can also import ```pluto.py``` as a library, and use all of Pluto's functions & methods.
+
+In both cases I highly recommend going through ```example.ipynb``` to get a better understanding of the software.
