@@ -25,3 +25,5 @@ Will run the file NYT_Example_3.jpg with the NYT class and save the output as ny
 You can also import ```pluto.py``` as a library, and use all of Pluto's functions & methods.
 
 In both cases I highly recommend going through ```example.ipynb``` to get a better understanding of the software.
+
+Furthermore, you can also use Pluto with a Graphical User Interface. For this option download pluto_gui.py additionally or get a .exe file from [here](https://downloads.patzold.io/).
