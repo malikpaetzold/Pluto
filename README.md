@@ -22,4 +22,6 @@ Download ```pluto.py``` and the ```models``` folder. Make sure you put them is t
 
 Will run the file NYT_Example_3.jpg with the NYT class and save the output as nytout.json. Type ```python pluto.py -h``` for more details.
 
-You can also import ```pluto.py``` as a library, and use all of Pluto's functions & methods. For this variant I highly recommend going through ```example.ipynb```.
+You can also import ```pluto.py``` as a library, and use all of Pluto's functions & methods.
+
+In both cases I highly recommend going through ```example.ipynb``` to get a better understanding of the software.
