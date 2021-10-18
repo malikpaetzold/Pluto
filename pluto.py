@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 import time
 import webbrowser
+import requests
 
 import easyocr
 reader = easyocr.Reader(['en'])
@@ -1760,6 +1761,12 @@ class NYT(PlutoObject):
         query.replace(" ", "+")
         
         webbrowser.open((link + query))
+    
+    def nyt_api_query(api_key, query):
+        url = "https://api.nytimes.com/svc/search/v2/articlesearch.json?q={}&api-key={}".format(query, api_key)
+
+        query = requests.get(url)
+        return query.json()
     
     def open_search(self):
         self.search(self.headline)
