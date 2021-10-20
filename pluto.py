@@ -1,5 +1,5 @@
 # Pluto
-# v0.9.0
+# v0.9.1
 
 # MIT License
 # Copyright (c) 2021 Malik Pätzold
@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 import time
 import webbrowser
+import requests
 
 import easyocr
 reader = easyocr.Reader(['en'])
@@ -936,6 +937,7 @@ class Facebook(PlutoObject):
     
     def classify(self, img=None):
         """Image or still part of text?
+        0 == image, 1 == text
         """
         if img is None: img = self.img
         img = to_grayscale(img)
@@ -1761,6 +1763,12 @@ class NYT(PlutoObject):
         
         webbrowser.open((link + query))
     
+    def nyt_api_query(api_key, query):
+        url = "https://api.nytimes.com/svc/search/v2/articlesearch.json?q={}&api-key={}".format(query, api_key)
+
+        query = requests.get(url)
+        return query.json()
+    
     def open_search(self):
         self.search(self.headline)
 
@@ -1769,22 +1777,158 @@ class Tagesschau(PlutoObject):
         super().__init__(img)
     
     def analyse(self, img=None):
-        """Do Tagesschau
+        """Main method for extraction information from a Tagesschau screenshot
         """
         if img is None: img = self.img
         
-        head, no_head = self.header(img)
+        dm = self.dark_mode(img)
+        img = to_grayscale(img)
+        # show_image(img)
         
-        info, body = self.info_split(no_head)
+        s = self.remove_image(img, dm)
+        if len(s) == 2:
+            image = s[0]
+            text = s[1]
+        else: text = s
         
-        head_ocr_result = self.ocr_cleanup(self.ocr(head))
-        info_ocr_result = self.ocr_cleanup(self.ocr(info))
-        body_ocr_result = self.ocr_cleanup(self.ocr(body))
+        s = self.slicing(text, dm)
+        return self.key_lines(s, dm)
+    
+    def remove_image(self, screenshot=None, dm=False):
+        """Removes the images from the screenshot, leaving only text
         
-        info_ocr_split = info_ocr_result.split("Stand:")
-        if info_ocr_split[1][0] == " ": info_ocr_split[1] = info_ocr_split[1][1:]
+        Args:
+            screenshot: input screenshot (grayscale)
+            dm: dark mode enabled
         
-        return info_ocr_split[0], head_ocr_result, body_ocr_result, info_ocr_split[1]
+        Returns:
+            The non-image and text parts of the input screenshot
+        """
+        if screenshot is None: screenshot = self.img
+        
+        dim = screenshot.shape
+        excerpt = screenshot[:, :int(dim[0]*0.01)]
+        
+        stop = False
+        for i in range(len(excerpt)-1):
+            for l in range(len(excerpt[i])):
+                if dm:
+                    if excerpt[i][l] > 25 or excerpt[i][l] < 11: stop = True
+                else:
+                    if excerpt[i][l] < 248: stop = True
+            if stop: break
+        
+        stop = False
+        for j in range(len(excerpt)-1, i, -1):
+            for l in range(len(excerpt[j])):
+                if dm:
+                    if excerpt[j][l] > 25 or excerpt[j][l] < 11: stop = True
+                else:
+                    if excerpt[j][l] < 248: stop = True
+            if stop: break
+        
+        image = screenshot[i:j]
+        text = np.delete(screenshot, range(i, j), 0)
+        
+        # confirm suspected image
+        net = ConvNet(1, 6, 12, 100, 20, 2)
+        net.load_state_dict(torch.load("Utility Models/general_1.pt"))
+        
+        device = self.determine_device()
+        tnsr = self.to_tensor(image, 224, torch.float32, device, 1)
+        
+        net.to(device).eval()
+        with torch.no_grad():
+            net_out = net(tnsr.to(device))[0]
+            predicted_class = torch.argmax(net_out)
+        result = predicted_class.cpu().numpy() # 0 == image, 1 == text
+        
+        if result == 0: return image, text
+        else: return screenshot
+    
+    def slicing(self, img=None, dm=False):
+        """Performs line split
+        
+        Args:
+            img: the input image
+            dm: is dark mode enabled
+        
+        Returns:
+            A list of slices
+        """
+        if img is None: img = self.img.copy()
+        og_img = img.copy()
+        img_dim = img.shape
+        if dm:
+            exptr = 255 - expand_to_rows(img[:, :int(img_dim[0]*0.5)], True, 80)
+        else: exptr = expand_to_rows(img[:, :int(img_dim[0]*0.5)], True, 150, False)
+        
+        zero = np.zeros((1, int(img_dim[0]*0.5)), dtype=np.uint8)
+        full = 255 - zero
+        
+        for i in range(len(exptr)):
+            if exptr[i][0] < 125: exptr[i] = zero
+            else: exptr[i] = full
+        
+        # show_image(exptr)
+
+        slices = []
+        if exptr[0][0] < 50: slices.append(0)
+        for i in range(1, len(exptr)):
+            if exptr[i-1][0] > 250 and exptr[i][0] < 50: # or \
+            # exptr[i][0] > 250 and exptr[i-1][0] < 50:
+                slices.append(i)
+
+        slc = []
+
+        for i in range(1, len(slices), 1):
+            if slices[i] - slices[i-1] < 5: continue
+            slc.append(og_img[slices[i-1]:slices[i]])
+        
+        # for s in slc: show_image(s)
+        
+        return slc
+    
+    def key_lines(self, slices, dm):
+        """Isolates the key liens of text from a slice of a screenshot
+        
+        Args:
+            slices: list of slices
+            dm: is dark mode
+        
+        Returns:
+            Date, Category, Title, Content
+        """
+        slc = []
+        
+        for s in slices:
+            if not dm: s = 255 - s
+            # show_image(s)
+            s_ocr = self.ocr_cleanup(self.ocr(s))
+            s = s[:, :int(s.shape[1]*0.5)]
+            m = np.max(s)
+            slc.append([s, s_ocr, m])
+            # print(m, s_ocr)
+            # show_image(s)
+        
+        for s in range(len(slc)):
+            if slc[s][2] < 200 and "Stand:" in slc[s][1]: break
+        
+        pubsplit = slc[s][1][7:]
+        content = ""
+        title = ""
+        category = ""
+        
+        for i in range(s+1, len(slc)):
+            content += slc[i][1] + " "
+        
+        for i in range(s):
+            if slc[i][1][-2:] == "AA":
+                category = slc[i][1][:-2]
+                continue
+            title += slc[i][1] + " "
+        
+        return pubsplit.strip(), category.strip(), title.strip(), content.strip()
     
     def to_json(self, img=None, path=None):
         """Extracts information from screenshot and saves it as json file.
@@ -1795,12 +1939,12 @@ class Tagesschau(PlutoObject):
         """
         if img is None: img = self.img.copy()
         import json
-        date, headline, body, category = self.analyse(img)
+        date, category, headline, body = self.analyse(img)
         
         jasoon = {  "source": "Tagesschau",
                     "category": "News Article",
                     "article": {
-                        "created": "[Published] " + date,
+                        "created": "[Updated] " + date,
                         "organisation": "Tagesschau",
                         "headline": headline,
                         "body": body,
@@ -1814,25 +1958,98 @@ class Tagesschau(PlutoObject):
             json.dump(jasoon, out, indent=6)
             out.close()
     
+    def dark_mode(self, img=None):
+        """Checks if dark mode is enabled
+        
+        Args:
+            img: input screenshot (grayscale)
+        
+        Returns:
+            Dark Mode enabled? True / False
+        """
+        if img is None: img = self.img
+        dim = img.shape
+        img = img[:, :int(dim[0]*0.02)]
+        # show_image(img)
+        avg = np.average(img)
+        return avg < 150
+    
+    # previous version
+    def analyse2(self, img=None):
+        """Do Tagesschau
+        """
+        if img is None: img = self.img
+        
+        self.dark_mode(img)
+        head, no_head = self.header(img)
+        
+        info, body = self.info_split(no_head)
+        
+        head_ocr_result = self.ocr_cleanup(self.ocr(head))
+        info_ocr_result = self.ocr_cleanup(self.ocr(info))
+        body_ocr_result = self.ocr_cleanup(self.ocr(body))
+        
+        info_ocr_split = info_ocr_result.split("Stand:")
+        print(info_ocr_split)
+        if info_ocr_split[1][0] == " ": info_ocr_split[1] = info_ocr_split[1][1:]
+        
+        return info_ocr_split[0], head_ocr_result, body_ocr_result, info_ocr_split[1]
+    
     def header(self, img=None):
         if img is None: img = self.img
         
         dim = img.shape
         
-        to_grayscale(img)
+        img_og = img.copy()
+        img = to_grayscale(img)
+        show_image(img)
         
-        no_header = iso_grayscale(img, True, 90, True, (15, 15))
-        no_header_exptr = expand_to_rows(no_header[:,:int(no_header.shape[1] / 4)], True, 5)
+        # no_header, only_header = iso_grayscale(img, True, 90, False, (15, 15), True)
+        # show_image(no_header)
+        # show_image(only_header)
+        if self.dark_mode(img):
+            # no_header_exptr = expand_to_rows(no_header[:,:int(no_header.shape[1] / 4)], True, 25)
+            no_header_exptr = expand_to_rows(img[:,:int(img.shape[1] / 4)], True, 25)
+        show_image(no_header_exptr)
         
+        slices = []
+        for i in range(2, len(no_header_exptr)):
+            if no_header_exptr[i][0] > 250 and no_header_exptr[i-1][0] < 100:
+                slices.append(i)
+        slices.append(len(img) - 1)
+
+        parts = []
+
+        for i in range(1, len(slices)):
+            temp = img_og[slices[i-1]:slices[i]]
+            # temp2 = to_grayscale(temp.copy())
+            # cnt = False
+            # for row in temp2:
+            #     for pix in row:
+            #         if pix > 253:
+            #             cnt = True
+            #             break
+            # if not cnt: continue
+            
+            parts.append(temp)
+        
+        print(len(parts))
+        for p in parts: show_image(p)
+        
+        return parts
+    
         head = []
         no_head = []
         
         for i in range(len(img)):
-            if no_header_exptr[i][0] > 100: no_head.append(img[i])
-            else: head.append(img[i])
+            if no_header_exptr[i][0] > 100: no_head.append(img_og[i])
+            else: head.append(img_og[i])
         
         head = np.array(head)
         no_head = np.array(no_head)
+        
+        show_image(head)
+        show_image(no_head)
         
         return head, no_head
     
@@ -1840,10 +2057,11 @@ class Tagesschau(PlutoObject):
         if img is None: img = self.img
         
         # img_og = img.copy()
-        
+        show_image(img)
         iso = trimm_and_blur(img[:,:int(img.shape[1] / 4),:].copy(), False, 70, (10, 10), [255, 255, 255], True, [0, 0, 0])
+        show_image(iso)
         iso = expand_to_rows(iso[:,:,0], False, 5)
-        # show_image(iso)
+        show_image(iso)
         
         info = []
         body = None
@@ -1855,8 +2073,8 @@ class Tagesschau(PlutoObject):
                 break
         
         info = np.array(info)
-        # show_image(info)
-        # show_image(body)
+        show_image(info)
+        show_image(body)
         
         return info, body
 
