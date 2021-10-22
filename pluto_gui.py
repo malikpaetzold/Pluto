@@ -1,140 +1,12 @@
-from re import S
+import sys
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QApplication, QMainWindow, QInputDialog
 
-import cv2
-from matplotlib.pyplot import text
 import numpy as np
 
 import pluto as pl
 
 util = pl.PlutoObject(None)
-
-def fox_analyse(img, display=False):
-    msg = ""
-    og_shape = img.shape
-    og_img = img.copy()
-    img = cv2.resize(img, (512, 512))
-    if display: pl.show_image(img)
-    black = np.zeros((512, 512))
-    
-    for i in range(len(black)):
-        for j in range(len(black[0])):
-            temp = img[i][j]
-            if (temp == [34, 34, 34]).all(): black[i][j] = 255
-    blured = cv2.blur(black, (20, 20))
-
-    for i in range(len(blured)):
-        for j in range(len(blured[0])):
-            if blured[i][j] < 40: blured[i][j] = 0
-            else: blured[i][j] = 255
-
-    msk = pl.expand_to_rows(blured)
-    if display: pl.show_image(msk)
-
-    og_size_msk = cv2.resize(msk, (og_shape[1], og_shape[0]))
-    
-    top = []
-    heading = []
-    bottom = []
-
-    top_part = True
-    bottom_part = False
-
-    # print(img.shape)
-    # cv2.imwrite("test1.jpg", og_img)
-    for i in range(len(og_img)):
-        if og_size_msk[i][0] > 1:
-            heading.append(og_img[i])
-            if top_part:
-                top_part = False
-                bottom_part = True
-        elif top_part: top.append(og_img[i])
-        else: bottom.append(og_img[i])
-
-    heading = np.array(heading)
-    bottom = np.array(bottom)
-    top = np.array(top)
-    
-    # print(heading.shape, bottom.shape, top.shape)
-    
-    if display:
-        pl.show_image(heading)
-        pl.show_image(bottom)
-        pl.show_image(top)
-
-    try:
-        ocr_result = util.ocr(heading)
-        headline = util.ocr_cleanup(ocr_result)
-    except Exception as e:
-        ocr_result = "null"
-        headline = "null"
-        msg = "Error while performing ocr: ", str(e)
-
-    cat_info_img = []
-    top_len = len(top)
-    for i in range(top_len, 0, -1):
-        if top[i-1][0][0] > 250: cat_info_img.insert(0, top[i-1])
-        else: break
-
-    cat_info_img = np.array(cat_info_img)
-    # print(cat_info_img.shape)
-    if display: pl.show_image(cat_info_img)
-
-    try:
-        ocr_result = util.ocr(cat_info_img)
-        clean_ocr = util.ocr_cleanup(ocr_result)
-        # print("clean ocr", clean_ocr)
-    except Exception as e:
-        ocr_result = "null"
-        clean_ocr = "null"
-        msg = "Error while performing ocr: ", str(e)
-
-    try:
-        dotsplit = clean_ocr.split("-")[0][:-1].lstrip(" ")
-        pubsplit = clean_ocr.split("Published")[1].lstrip(" ")
-    except Exception as e:
-        dotsplit = "null"
-        pubsplit = "null"
-        msg = "Error: " + str(e)
-    
-    subinfo_bottom = []
-
-    stoper = False
-    for row in bottom:
-        subinfo_bottom.append(row)
-        for pix in row:
-            if pix[0] > 200 and pix[0] < 240 and pix[2] < 50 and pix[1] < 50:
-                stoper = True
-                break
-        if stoper: break
-
-    subinfo_bottom = np.array(subinfo_bottom[:-3])
-    if display: pl.show_image(subinfo_bottom)
-    try:
-        subinfo = util.ocr_cleanup(util.ocr(subinfo_bottom))
-    except Exception as e:
-        subinfo = "null"
-        msg = "Error while performing ocr: " + str(e)
-
-    subsplit = subinfo.split()
-
-    author_list = []
-    subtitle_list = []
-    subinfo_switcher = True
-
-    for w in reversed(subsplit):
-        if w == "By" and subinfo_switcher:
-            subinfo_switcher = False
-            continue
-        if w == "News" or w == "Fox" or w == "|": continue
-        if subinfo_switcher: author_list.insert(0, w)
-        else: subtitle_list.insert(0, w)
-
-    author = " ".join(author_list)
-    subtitle = " ".join(subtitle_list)
-    
-    return author, subtitle, headline, pubsplit, dotsplit, msg
 
 class Ui_MainWindow(QMainWindow):
     def setupUi(self, MainWindow):
@@ -182,7 +54,7 @@ class Ui_MainWindow(QMainWindow):
         self.analyseButton4.setGeometry(QtCore.QRect(260, 90, 75, 25))
         self.analyseButton4.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.analyseButton4.setObjectName("analyseButton3")
-        self.analyseButton4.clicked.connect(self.do_twitter)
+        self.analyseButton4.clicked.connect(self.do_whatsapp)
         
         self.analyseButton5 = QtWidgets.QPushButton(self.centralwidget)
         self.analyseButton5.setGeometry(QtCore.QRect(340, 90, 75, 25))
@@ -289,7 +161,7 @@ class Ui_MainWindow(QMainWindow):
         self.analyseButton.setText(_translate("MainWindow", "Fox News"))
         self.analyseButton2.setText(_translate("MainWindow", "NYT"))
         self.analyseButton3.setText(_translate("MainWindow", "FB"))
-        self.analyseButton4.setText(_translate("MainWindow", "Twitter"))
+        self.analyseButton4.setText(_translate("MainWindow", "WhatsApp"))
         self.analyseButton5.setText(_translate("MainWindow", "W Post"))
         self.analyseButton6.setText(_translate("MainWindow", "WELT"))
         self.analyseButton7.setText(_translate("MainWindow", "Tagesschau"))
@@ -317,16 +189,24 @@ class Ui_MainWindow(QMainWindow):
     
     def do_foxnews(self):
         self.last_action = "fox"
-        img = img = pl.read_image(self.img_path)
-        author, subtitle, headline, pubsplit, dotsplit, msg = fox_analyse(img)
-        self.label.setText("Result: \nAuthor: " + author + "\nSubtitle: " + subtitle + "\nHeadline: " + headline + "\nPlublished: " + pubsplit + "\nTopic: " + dotsplit)
+        try:
+            img = img = pl.read_image(self.img_path)
+            pubsplit, headline, subtitle, author, dotsplit = pl.FoxNews(img).analyse()
+            self.label.setText("Result: \nAuthor: " + author + "\nSubtitle: " + subtitle + "\nHeadline: " + headline + "\nPublished: " + pubsplit + "\nTopic: " + dotsplit)
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
     
     def do_facebook(self):
         self.last_action = "fb"
-        img = img = pl.read_image(self.img_path)
-        author, date, body_text, engagement_text = pl.Facebook(img).analyse()
-        self.label.setText("Result: \nAuthor: " + author + "\nPublished: " + date + "\nPost: " + body_text + "\nEngagement: " + str(engagement_text))
+        try:
+            img = img = pl.read_image(self.img_path)
+            author, date, body_text, engagement_text = pl.Facebook(img).analyse(img)
+            self.label.setText("Result: \nAuthor: " + author + "\nPublished: " + date + "\nPost: " + body_text + "\nEngagement: " + str(engagement_text))
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
     
     def do_twitter(self):
@@ -340,11 +220,15 @@ class Ui_MainWindow(QMainWindow):
         self.last_action = "nyt"
         _translate = QtCore.QCoreApplication.translate
         self.actionSearch.setText(_translate("MainWindow", "NYT Search"))
-        img = img = pl.read_image(self.img_path)
-        nyt = pl.NYT(img)
-        headline, subtitle, author = nyt.analyse()
-        self.search_term = headline
-        self.label.setText("Result: \nHeadline: " + str(headline) + "\nSubtitle: " + S(subtitle) + "\nAuthor: " + str(author))
+        try:
+            img = img = pl.read_image(self.img_path)
+            nyt = pl.NYT(img)
+            headline, subtitle, author = nyt.analyse(img)
+            self.search_term = headline
+            self.label.setText("Result: \nHeadline: " + str(headline) + "\nSubtitle: " + str(subtitle) + "\nAuthor: " + str(author))
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
     
     def nyt_search(self, query=str):
@@ -352,59 +236,83 @@ class Ui_MainWindow(QMainWindow):
 
     def do_wpost(self):
         self.last_action = "wpost"
-        img = img = pl.read_image(self.img_path)
-        wpost = pl.WPost(img)
-        category, headline, author, date, body = wpost.analyse()
-        self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nAuthor(s): " + author + "\nPublished: " + date + "\nContent: " + body)
+        try:
+            img = img = pl.read_image(self.img_path)
+            wpost = pl.WPost(img)
+            category, headline, author, date, body = wpost.analyse(img)
+            self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nAuthor(s): " + author + "\nPublished: " + date + "\nContent: " + body)
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
     
     def do_welt(self):
         self.last_action = "welt"
-        img = img = pl.read_image(self.img_path)
-        welt = pl.WELT(img)
-        headline, category, date = welt.analyse()
-        self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date)
+        try:
+            img = img = pl.read_image(self.img_path)
+            welt = pl.WELT(img)
+            headline, author, date, category = welt.analyse(img)
+            self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nAuthor(s): " + author)
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
     
     def do_tagesschau(self):
         self.last_action = "tag"
-        img = img = pl.read_image(self.img_path)
-        tschau = pl.Tagesschau(img)
-        date, headline, body, category = tschau.analyse()
-        self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        try:
+            img = img = pl.read_image(self.img_path)
+            tschau = pl.Tagesschau(img)
+            date, headline, body, category = tschau.analyse(img)
+            self.label.setText("Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
         
     def do_discord(self):
         self.last_action = "discord"
-        img = img = pl.read_image(self.img_path)
-        discord = pl.Discord(img)
-        return_list = discord.analyse()
-        out = ""
-        for msg in return_list:
-            out += str(msg) + "\n"
-        self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        try:
+            img = img = pl.read_image(self.img_path)
+            discord = pl.Discord(img)
+            return_list = discord.analyse(img)
+            out = ""
+            for msg in return_list:
+                out += str(msg) + "\n"
+            self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
     
     def do_whatsapp(self):
         self.last_action = "whatsapp"
-        img = img = pl.read_image(self.img_path)
-        whatsapp = pl.WhatsApp(img)
-        return_list = whatsapp.analyse()
-        out = ""
-        for msg in return_list:
-            out += str(msg) + "\n"
-        self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        try:
+            img = img = pl.read_image(self.img_path)
+            whatsapp = pl.WhatsApp(img)
+            return_list = whatsapp.analyse(img)
+            out = ""
+            for msg in return_list:
+                out += str(msg) + "\n"
+            self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
     
     def do_fbm(self):
         self.last_action = "fbm"
-        img = img = pl.read_image(self.img_path)
-        fbm = pl.FBM(img)
-        return_list = fbm.analyse()
-        out = ""
-        for msg in return_list:
-            out += str(msg) + "\n"
-        self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        try:
+            img = img = pl.read_image(self.img_path)
+            fbm = pl.FBM(img)
+            return_list = fbm.analyse(img)
+            out = ""
+            for msg in return_list:
+                out += str(msg) + "\n"
+            self.label.setText(out)#"Result: \nHeadline: " + headline + "\nCategory: " + category + "\nPublished: " + date + "\nContent: " + body)
+        except Exception as e:
+            error_line = "(Error on line {})".format(sys.exc_info()[-1].tb_lineno)
+            self.label.setText("Something went wrong!\n" + str(e) + "\n" + error_line)
         self.update()
     
     def save_json(self):
@@ -416,15 +324,19 @@ class Ui_MainWindow(QMainWindow):
                 print("output path is not a .json file!")
                 return
             
-            img = img = pl.read_image(self.img_path)
-            if self.last_action == "fb": pl.Facebook(img).to_json(img, userInput)
-            elif self.last_action == "nyt": pl.NYT(img).to_json(img, userInput)
-            elif self.last_action == "discord": pl.Discord(img).to_json(img, userInput)
-            elif self.last_action == "whatsapp": pl.WhatsApp(img).to_json(img, userInput)
-            elif self.last_action == "fbm": pl.FBM(img).to_json(img, userInput)
-            elif self.last_action == "wpost": pl.WPost(img).to_json(img, userInput)
-            elif self.last_action == "welt": pl.WELT(img).to_json(img, userInput)
-            elif self.last_action == "fox": pl.FoxNews(img).to_json(img, userInput)
+            try:
+                img = img = pl.read_image(self.img_path)
+                if self.last_action == "fb": pl.Facebook(img).to_json(img, userInput)
+                elif self.last_action == "nyt": pl.NYT(img).to_json(img, userInput)
+                elif self.last_action == "discord": pl.Discord(img).to_json(img, userInput)
+                elif self.last_action == "whatsapp": pl.WhatsApp(img).to_json(img, userInput)
+                elif self.last_action == "fbm": pl.FBM(img).to_json(img, userInput)
+                elif self.last_action == "wpost": pl.WPost(img).to_json(img, userInput)
+                elif self.last_action == "welt": pl.WELT(img).to_json(img, userInput)
+                elif self.last_action == "fox": pl.FoxNews(img).to_json(img, userInput)
+            except Exception as e:
+                self.label.setText("Something went wrong!\n" + str(e))
+                self.update()
     
     def google_search(self):
         pass
