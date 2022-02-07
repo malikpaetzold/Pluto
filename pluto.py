@@ -1,8 +1,8 @@
 # Pluto
-# v0.9.2
+# v0.9.3
 
 # MIT License
-# Copyright (c) 2021 Malik Pätzold
+# Copyright (c) 2022 Malik Pätzold
 
 from typing import Literal
 import numpy as np
@@ -265,6 +265,27 @@ def google(query: str):
 
         webbrowser.open((link + query))
 
+import warnings
+import functools
+
+def deprecated(func):
+    """
+    This is a decorator which can be used to mark functions
+    as deprecated. It will result in a warning being emitted
+    when the function is used.
+    
+    The code for this function was copied from https://stackoverflow.com/a/30253848/12834761
+    """
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # turn off filter
+        warnings.warn("Call to deprecated function {}.".format(func.__name__),
+                        category=DeprecationWarning,
+                        stacklevel=2)
+        warnings.simplefilter('default', DeprecationWarning)  # reset filter
+        return func(*args, **kwargs)
+    return new_func
+
 class PlutoObject:
     def __init__(self, img: np.ndarray):
         self.img = img
@@ -332,6 +353,7 @@ class PlutoObject:
         
         Args:
             image: np.ndarray of the to be treated image.
+            switch_to_tesseract: deprecated parameter. can be assigned any value with no impact.
         
         Returns:
             String with the raw result of the OCR library.
@@ -742,6 +764,8 @@ class Facebook(PlutoObject):
     def split(self, img):
         """Splits the screenshot at an attached image or link
         """
+        if img is None: img = self.img
+        
         og_img = img.copy()
         img = to_grayscale(img)
         dm = self.dark_mode(img)
@@ -823,27 +847,6 @@ class Facebook(PlutoObject):
         
         # return slc
         return img[slices[0]:slices[1]], img[slices[1]:slices[len(slices)-1]]
-
-    def header(img):
-        slc = slice(img)
-        
-        show_image(slc[0])
-        show_image(slc[1])
-        return
-        header = []
-        text = []
-        
-        for indx, s in enumerate(slc):
-            print(type(s))
-            f = first(s)
-            if indx == 0:
-                header.append(s)
-                print(s.shape)
-            else:
-                text.append(s)
-                print(s.shape)
-        
-        return np.array(header), np.array(text)
 
     def first(self, img):
         """Gets the first block from a slice
@@ -1082,6 +1085,7 @@ class Facebook(PlutoObject):
         
         return top, body, engagement
     
+    @deprecated
     def old_topsplit(self, img=None, darkmode=None): # -> np.ndarray
         """---
         DEPRECATED
@@ -1149,6 +1153,7 @@ class Facebook(PlutoObject):
         
         webbrowser.open((link + query))
     
+    @deprecated
     def clean_top(self, img=None):
         """---
         DEPRECATED
@@ -1190,9 +1195,175 @@ class Facebook(PlutoObject):
 class Twitter(PlutoObject):
     def __init__(self, img: np.ndarray):
         super().__init__(img)
-        self.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-        self.header, self.bottom = None, None
+        self.header_info = None
+        self.profile_pic = None
+        self.bottom = None
     
+    def analyse(self, img=None):
+        """Main method for extraction information from the image
+        """
+        if img is None: img = self.img
+        
+        rows = self.slice(img)
+        assigned = self.assign(rows)
+        top, self.bottom = assigned[0], assigned[1:]
+        
+        self.profile_pic, self.header_info = self.header_cleanup(rows[0])
+        
+        if self.bottom is not None:
+            content = [self.ocr_cleanup(self.ocr(rows[t][0])) for t in range(1, len(rows)-1)]
+        else:
+            content = [self.ocr_cleanup(self.ocr(rows[t][0])) for t in range(1, len(rows))]
+        
+        content = " ".join(content)
+        
+        username, handle, postdate, client = self.extract(self.header_info, self.bottom)
+        
+        return username, handle, content, postdate, client
+    
+    def slice(self, img=None):
+        """slices the screenshot into multiple rows with different content
+        
+        Returns:
+            list of rows (rows are np.array)
+        """
+        if img is None: img = self.img
+        
+        img_og = img.copy()
+        img_bw = to_grayscale(img_og.copy())
+
+        img = expand_to_rows(to_grayscale(img[:, :int(len(img[0]) * 0.7)]), True, 150, False) # scroll bar removed
+
+        slices = []
+        for i in range(1, len(img)):
+            if img[i][0] > 250 and img[i-1][0] < 5 or \
+                img[i][0] < 250 and img[i-1][0] > 5:
+                slices.append(i)
+        slices.append(len(img) - 1)
+
+        parts = []
+
+        for i in range(1, len(slices)):
+            sliced = img_og[slices[i-1]:slices[i]]
+            avg = np.average(sliced)
+            if avg < 250:
+                parts.append([img_og[slices[i-1]-3:slices[i]+3], img_bw[slices[i-1]-3:slices[i]+3]])
+        
+        return parts
+    
+    def assign(self, parts):
+        """assigns each row to ether the top (header + content) or bottom (metadata) part
+        
+        Returns:
+            top (as np.array), has bottom? (boolean), bottom (np.array, only if has_bottom is true)
+        """
+        top = []
+        
+        # check if screenshot has bottom metadata part
+        has_bottom = False
+        canidate = parts[-1][1]
+        if np.min(canidate) > 11:
+            bottom = canidate
+            has_bottom = True
+
+        for i in range(1, len(parts), 1):
+            temp = parts[i][1]
+            minv = np.min(temp)
+            averg = np.average(temp)
+            if minv < 10:
+                top.append(parts[i][0])
+        
+        if has_bottom:
+            return top, has_bottom, bottom
+        else: return top, None
+    
+    def header_cleanup(self, header):
+        """seperates the profile picture from the header information
+        
+        Returns:
+            the profile picture & header information (both as np.array)
+        """
+        # remove profile picture
+        row = header[0].copy()
+        bwrow = header[1].copy()
+
+        bwrow = np.transpose(bwrow, (1, 0))
+        row = np.transpose(row, (1, 0, 2))
+        rowexptr = expand_to_rows(bwrow, True, 240, False)
+
+        imprts = []
+        for i in range(1, len(rowexptr)):
+            if rowexptr[i][0] > 250 and rowexptr[i-1][0] < 50 or \
+            rowexptr[i][0] < 250 and rowexptr[i-1][0] > 50:
+                imprts.append(i)
+
+        slc = []
+
+        for i in range(1, len(imprts), 2):
+            if imprts[i] - imprts[i-1] < 5: continue
+            tempelem = np.transpose(row[imprts[i-1]:imprts[i]], (1, 0, 2))
+            tempocr = self.ocr(tempelem[int(tempelem.shape[0] / 2) :]).strip()
+            
+            if tempocr[0] == "@": break
+
+        row = np.transpose(row, (1, 0, 2))
+        profile_pic = row[:, :imprts[i-1]]
+        header_info = row[:, imprts[i-1]:]
+        
+        return profile_pic, header_info
+    
+    def extract(self, header, bottom):
+        """extracts data from images
+        
+        Returns:
+            username, handle, postdate, client (all str)
+        """
+        if header is None: header = self.header_info
+        if bottom is None: header = self.bottom
+        # header data
+        subheader = header[int(header.shape[0] / 2) :]
+        header = header[: int(header.shape[0] / 2)]
+        subheader_ocr_result = self.ocr_cleanup(self.ocr(subheader))
+        header_ocr_result = self.ocr_cleanup(self.ocr(header))
+        
+        postdate, client = None, None
+        if bottom is not None:
+            bottom_ocr_result = self.ocr_cleanup(self.ocr(bottom[1]))
+            bts = bottom_ocr_result.split("Twitter")
+            client = "Twitter" + bts[1]
+            postdate = bts[0]
+        
+        return header_ocr_result, subheader_ocr_result, postdate, client
+    
+    def to_json(self, img=None, path=None):
+        """Extracts information from screenshot and saves it as json file.
+        
+        Args:
+            img: screenshot as np.array
+            path: path to where the json file should be saved
+        """
+        if img is None: img = self.img.copy()
+        import json
+        result = self.analyse(img)
+        
+        jasoon = {  "source": "Twitter",
+                    "category": "Social Media",
+                    "post": {
+                        "username": result[0],
+                        "handle": result[1],
+                        "content": result[2],
+                        "date": result[3],
+                        "client": result[4],
+                    }
+                }
+        
+        if path == None: return json.dumps(jasoon)
+        else:
+            out = open(path, "w")
+            json.dump(jasoon, out, indent=6)
+            out.close()
+    
+    @deprecated
     def split(self, img=None, display=False):
         img_og = img
         if img is None: img_og = self.img
@@ -1249,6 +1420,7 @@ class Twitter(PlutoObject):
         avg = np.average(img)
         return avg < 150
     
+    @deprecated
     def header_analyse(self, img=None, display=False):
         if img is None: img = self.header.copy()
         
@@ -1279,6 +1451,7 @@ class Twitter(PlutoObject):
         
         return usersplit[0][:-1], usersplit[1]
     
+    @deprecated
     def body_analyse(self, img=None, display=False): # --> str
         if img is None: img = self.bottom.copy()
         img_og = img.copy()
@@ -1299,6 +1472,7 @@ class Twitter(PlutoObject):
         
         return self.ocr_cleanup(self.ocr(out))
     
+    @deprecated
     def analyse_light(self, img=None):
         if img is None: img = self.img
         
@@ -1321,16 +1495,7 @@ class Twitter(PlutoObject):
         
         return jasoon
     
-    def analyse(self, img=None):
-        if img is None: img = self.img
-        
-        self.split()
-        
-        head_info = self.header_analyse()
-        body_info = self.body_analyse()
-        
-        return head_info[0], head_info[1], body_info
-    
+    @deprecated
     def dark_mode(self, img=None):  # -> bool
         """Checks if the screenshot has dark mode enabled
         
@@ -1349,6 +1514,7 @@ class Twitter(PlutoObject):
         final_value = sum([top_row, bottom_row, left_collum, right_collum]) / 4
         return final_value < 125
     
+    @deprecated
     def analyse_light(self):
         result = None
         if self.dark_mode(): result = self.dark()
@@ -1358,6 +1524,7 @@ class Twitter(PlutoObject):
         # show_image(body)
         return self.ocr_cleanup(self.ocr(header)), self.ocr_cleanup(self.ocr(body))
     
+    @deprecated
     def std(self, img=None, display=False):
         input_img = None
         if img is not None: input_img = img.copy()
@@ -1404,6 +1571,7 @@ class Twitter(PlutoObject):
         
         return header_info, bottom
     
+    @deprecated
     def dark(self, img=None, display=False):
         """Segmentates the input screenshot (dark mode enabled) into header and body.
         
@@ -1463,9 +1631,11 @@ class Twitter(PlutoObject):
         
         return header_info, bottom
     
+    @deprecated
     def black(self):
         pass
     
+    @deprecated
     def header_segmentation(self, img=None, inverted=False):
         if img is None: img = self.img
         
