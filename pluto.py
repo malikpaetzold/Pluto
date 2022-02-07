@@ -2002,7 +2002,7 @@ class Tagesschau(PlutoObject):
         
         # confirm suspected image
         net = ConvNet(1, 6, 12, 100, 20, 2)
-        net.load_state_dict(torch.load("Utility Models/general_1.pt"))
+        net.load_state_dict(torch.load("models/general_1.pt"))
         
         device = self.determine_device()
         tnsr = self.to_tensor(image, 224, torch.float32, device, 1)
@@ -2592,15 +2592,23 @@ class WELT(PlutoObject):
         super().__init__(img)
     
     def analyse(self, img=None):
+        """Main method to extract information from a screenshot of a 'Welt' article
+        """
         if img is None: img = self.img
         
-        headline_img, category_img, date_img = self.split()
+        cat, slices = self.split(img)
         
-        headline = self.ocr_cleanup(self.ocr(headline_img))
-        category = self.ocr_cleanup(self.ocr(category_img))
-        date = self.ocr_cleanup(self.ocr(date_img))
+        headline, author, date = "", "", ""
+        category = self.ocr_cleanup(self.ocr(cat))
         
-        return headline, category, date
+        for s in slices:
+            ocrresult = self.ocr_cleanup(self.ocr(s))
+            
+            if ocrresult[:4] == "Von ": author = ocrresult[4:]
+            elif ocrresult[:7] == "Stand: ": date = ocrresult[6:]
+            else: headline += " " + ocrresult
+        
+        return headline, author, date, category
     
     def to_json(self, img=None, path=None):
         """Extracts information from screenshot and saves it as json file.
@@ -2609,17 +2617,18 @@ class WELT(PlutoObject):
             img: screenshot as np.array
             path: path to where the json file should be saved
         """
-        if img is None: img = self.img.copy()
+        if img is None: img = self.img
         import json
         
-        headline, category, date = self.analyse(img)
+        headline, author, date, category = self.analyse(img)
         
         jasoon = {  "source": "WELT",
                     "category": "News Article",
                     "article": {
-                        "created": "[Published] " + date,
+                        "created": date,
                         "headline": headline,
-                        "category": category
+                        "category": category,
+                        "author": author
                     }
                 }
         
@@ -2635,38 +2644,31 @@ class WELT(PlutoObject):
         img_og = img.copy()
         
         img = to_grayscale(img)
-        show_image(img)
+        # show_image(img)
         
         images, img = self.images(img)
         
-        img = expand_to_rows(img, True, 5, False)
-        show_image(img)
+        img = expand_to_rows(img, True, 30, False)
+        # show_image(img)
         
         category = []
-        date = []
+        sliceindx = []
+        slices = []
         
         for i in range(len(img)):
             if img[i][0] == 0: break
-            else: category.append(img_og[i])
+        category = img_og[:i]
         
-        for j in range(len(img)-1, 0, -1):
-            if img[j][0] == 0: break
+        sliceindx.append(i)
+        for j in range(i+1, len(img)):
+            if img[j-1][0] < 100 and img[j][0] > 250: sliceindx.append(j)
         
-        for t in range(j, 0, -1):
-            if img[t][0] > 2: break
-            else: date.insert(0, img_og[t])
-        date.insert(0, img_og[t-1])
+        # print(sliceindx)
+        for i in range(1, len(sliceindx), 1):
+            if sliceindx[i] - sliceindx[i-1] < 5: continue
+            slices.append(img_og[sliceindx[i-1]:sliceindx[i]])
         
-        img = img_og[i-10:t-5]
-        category = np.array(category)
-        date = np.array(date)
-        
-        if display:
-            show_image(img)
-            show_image(category)
-            show_image(date)
-        
-        return img, category, date
+        return category, slices
     
     def images(self, img=None):
         if img is None: img = self.img
@@ -3098,69 +3100,72 @@ class WhatsApp(PlutoObject):
         self.img = None
     
     def analyse(self, img=None):
-        """Main method for extractiong messages from a FB Messenger chat screenshot
+        """Main method for extractiong messages from a WhatsApp chat screenshot
         """
         if img is None: img = self.img
         
-        slices = self.slice(img, self.darkmode(img))
+        slices = self.sliceit(img)
         msg = []
         
         for slc in slices:
             io = self.io_classification(slc)
             try:
                 message = self.ocr_cleanup(self.ocr(slc))
-                if io == 0: msg.append(["received", message])
+                if io == 1: msg.append(["received", message])
                 else: msg.append(["send", message])
             except Exception as e: print(e)
         return msg
     
-    def analyse_light(self, img=None):
-        if img is None: img = self.img
+    def to_json(self, img=None, path=None):
+        if img is None: img = self.img.copy()
+        import json
+        msg = self.analyse(img)
         
-        # show_image(cv2.resize(img, (500, 500)))
+        jasoon = {  "source": "WhatsApp",
+                    "category": "Chat",
+                    "messages": msg
+                }
         
-        dim = img.shape
-        gray = to_grayscale(img.copy())
-        
+        if path == None: return json.dumps(jasoon)
+        else:
+            out = open(path, "w")
+            json.dump(jasoon, out, indent=6)
+            out.close()
+    
+    def sliceit(self, img=None):
+        """Slices the image into messages
+        """
+        img = img[:, int(img.shape[1] / 50) : int(img.shape[1] - (img.shape[1] / 50))]
+
+        exptr = expand_to_rows(to_grayscale(img.copy()), True, 45)
+
+        slice_indx = []
+
+        for i in range(len(exptr)):
+            if exptr[i][0] > 250 and exptr[i-1][0] < 100 or \
+            exptr[i][0] < 250 and exptr[i-1][0] > 100:
+                slice_indx.append(i)
+
         slices = []
-        for i in range(1, len(gray)):
-            if (gray[i][int(dim[1] / 4)] < 5 and gray[i-1][int(dim[1] / 4)] > 5) or \
-            (gray[i][int(dim[1] / 4)] > 5 and gray[i-1][int(dim[1] / 4)] < 5) or \
-            (gray[i][int(dim[1] / 5 * 4)] > 5 and gray[i-1][int(dim[1] / 5 * 4)] < 5) or \
-            (gray[i][int(dim[1] / 5 * 4)] < 5 and gray[i-1][int(dim[1] / 5 * 4)] > 5): slices.append(i)
-        
-        slices.append(len(gray)-1)
-        print(slices)
-        msg = []
-        
-        for i in range(1, len(slices), 1):
-            the_slice = (gray[slices[i-1] : slices[i]])
-            the_slice = self.row_filter_recived(the_slice)
-            if the_slice is not None:
-                # show_image(the_slice)
-                try:
-                    message = self.ocr_cleanup(self.ocr(the_slice))
-                    sor = self.send_or_recived(the_slice)
-                    if sor == 0: continue
-                    elif sor == 1: msg.append(["send", message])
-                    else: msg.append(["received", message])
-                except Exception: pass
-        # print(msg)
-        return msg
+
+        for i in range(1, len(slice_indx), 2):
+            if slice_indx[i] - slice_indx[i-1] < 5: continue
+            slices.append(img[slice_indx[i-1]:slice_indx[i]])
+    
+        return slices
     
     def io_classification(self, img=None):
         """Send or Recived?
         """
-        if img is None: img = self.img
-        
-        net = ConvNet(3, 6, 12, 100, 50, 2)
-        net.load_state_dict(torch.load("models/wa.pt"))
-        
-        device = self.determine_device()
+        net = ConvNet(3, 6, 12, 300, 20, 2)
+        net.load_state_dict(torch.load("models/wa1.pt"))
+
+        util = PlutoObject(None)
+        device = util.determine_device()
         net.to(device)
         
-        tnsr = self.to_tensor(img, 224, torch.float32, device)
-        
+        tnsr = util.to_tensor(img, 224, torch.float32, device)
+    
         net.eval()
         with torch.no_grad():
             net_out = net(tnsr.to(device))[0]
@@ -3181,6 +3186,14 @@ if __name__ == "__main__":
             NYT(img).to_json(img, arg_o)
         elif arg_c == "Tagesschau":
             Tagesschau(img).to_json(img, arg_o)
+        elif arg_c == "WPost":
+            WPost(img).to_json(img, arg_o)
+        elif arg_c == "WELT":
+            WELT(img).to_json(img, arg_o)
+        elif arg_c == "FoxNews":
+            FoxNews(img).to_json(img, arg_o)
+        elif arg_c == "Discord":
+            Discord(img).to_json(img, arg_o)
         elif arg_c == "Facebook":
             Facebook(img).to_json(img, arg_o)
         elif arg_c == "FBM":
