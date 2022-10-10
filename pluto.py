@@ -359,6 +359,20 @@ class PlutoObject:
         model.to(device)
         
         return model
+    
+    def load_model_from_github(self, repository="patzold/yolov5-slim", weights="models/general.pt", force_reload=False):
+        """Loads a model architecture from a GitHub repository.
+        
+        Args:
+            repository: Path to the repository -> repo_owner/repo_name with optional branch
+            weights: Path to weights the model will be loaded with
+            force_reload: Force a fresh download of the repo
+        
+        Returns:
+            An instance of the loaded model class with the weights specified in the parameter
+        """
+        _model = torch.hub.load(repository, "custom", path=weights, source="github", force_reload=force_reload)
+        return _model
 
     def vis_model_prediction(self, img: np.ndarray, mask: np.ndarray, display=False):  # --> np.ndarray
         """ Shows the predicted mask of a segmentation model as an overlay on the input image.
@@ -1910,6 +1924,52 @@ class NYT(PlutoObject):
             json.dump(jasoon, out, indent=6)
             out.close()
     
+    def headline_using_yolo(self, img=None):
+        """Localizes and returns an image excert of the article headline
+        
+        Args:
+            img: if the used screenshot should differ from self.img, pass it here [optional]
+        
+        Returns:
+            The image excert of the headline and the y coordinate where the excert ends
+        """
+        if img is None: img = self.img
+        
+        detect_text_block = self.load_model_from_github(weights="models/text_block.pt")
+        
+        result = detect_text_block(img)
+
+        text_blocks = []
+
+        # process yolo results
+        xyxy = result.xyxy[0].cpu().numpy()
+        for i in range(len(xyxy)):
+            xyxyc = result.xyxy[0].cpu().numpy()[i]
+            
+            excert = img[int(xyxyc[1]) : int(xyxyc[3]), int(xyxyc[0]) : int(xyxyc[2])]
+            y_center = int(xyxyc[3] - xyxyc[1]) / 2
+            
+            text_blocks.append([excert, xyxyc, y_center, np.min(excert), np.max(excert)])
+
+        # sort detected areas from top to bottom
+        text_blocks.sort(key=lambda text_block: text_block[2])
+        
+        # check if excert has correct color to be the headline
+        headline_img = None
+        headline_y_end = None
+
+        for tb in text_blocks:
+            if headline_img is None:
+                if tb[3] < 25:
+                    # this is the headline block, widen selected area if necessary
+                    x_min = int(min(tb[1][0], img.shape[1]*0.05))
+                    x_max = int(max(tb[1][3], img.shape[1]*0.95))
+                    
+                    headline_img = img[int(tb[1][1]) : int(tb[1][3]), x_min : x_max]
+                    headline_y_end = int(tb[1][3])
+        
+        return headline_img, headline_y_end
+    
     def search(self, query: str):
         """Searches a query with the NYT's search function. Opens result in browser window.
         """
@@ -1981,7 +2041,7 @@ class Tagesschau(PlutoObject):
         
         # confirm suspected image
         net = ConvNet(1, 6, 12, 100, 20, 2)
-        net.load_state_dict(torch.load("Utility Models/general_1.pt"))
+        net.load_state_dict(torch.load("models/general_1.pt"))
         
         device = self.determine_device()
         tnsr = self.to_tensor(image, 224, torch.float32, device, 1)
@@ -2266,6 +2326,7 @@ class WELT(PlutoObject):
                         "created": date,
                         "headline": headline,
                         "category": category,
+                        "author": author,
                         "author": author
                     }
                 }
@@ -2282,7 +2343,7 @@ class WELT(PlutoObject):
         img_og = img.copy()
         
         img = to_grayscale(img)
-        # show_image(img)
+        # # show_image(img)
         
         images, img = self.images(img)
         
@@ -2825,6 +2886,14 @@ if __name__ == "__main__":
             NYT(img).to_json(img, arg_o)
         elif arg_c == "Tagesschau":
             Tagesschau(img).to_json(img, arg_o)
+        elif arg_c == "WPost":
+            WPost(img).to_json(img, arg_o)
+        elif arg_c == "WELT":
+            WELT(img).to_json(img, arg_o)
+        elif arg_c == "FoxNews":
+            FoxNews(img).to_json(img, arg_o)
+        elif arg_c == "Discord":
+            Discord(img).to_json(img, arg_o)
         elif arg_c == "Facebook":
             Facebook(img).to_json(img, arg_o)
         elif arg_c == "FBM":
