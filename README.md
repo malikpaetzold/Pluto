@@ -3,9 +3,7 @@ Pluto is a Python library for working with & analyzing screenshots.
 
 ![Explainer_1](https://user-images.githubusercontent.com/60754058/119409979-62be3800-bce8-11eb-9f5c-60d623d065b3.png)
 
-The core idea is to extract information from a screenshot and then provide that information in an orderly fashion. This opens the door to many more possibilities, both for applications and analytical pipelines.
-
-![ezgif com-gif-maker (1)](https://user-images.githubusercontent.com/60754058/129491738-09c28f3e-0b52-49a1-8624-08f0a42bc8cd.gif)
+The core idea is to extract usefull information from a screenshot and to return that information in a machine-searchable format like JSON. This opens the door to many more possibilities, both for applications and analytical pipelines.
 
 How exactly does it all work? The text is extracted using an OCR library (optical character recognition). However, the more interesting part is the correct assignment, meaning, for example, whether the extracted text is still part of the username or already the content of a post. The assignment takes place using the help of AI-supported computer vision and some more specialized techniques.
 
