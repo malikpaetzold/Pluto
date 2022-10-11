@@ -1,5 +1,5 @@
 # Pluto
-# v0.9.4
+# v1.0.0
 
 # MIT License
 # Copyright (c) 2022 Malik Pätzold
@@ -13,10 +13,10 @@ import torch
 import torch.nn as nn
 import torchvision.transforms.functional as tf
 import torch.nn.functional as F
+import torch.hub as hub
 
 import time
 import webbrowser
-import requests
 
 import easyocr
 reader = easyocr.Reader(['en'])
@@ -42,11 +42,6 @@ if __name__ == "__main__":
     arg_o = args.output
     arg_c = args.category
 
-# try:
-    # print(arg_i)
-    # print(arg_o)
-    # print(arg_c)
-# except Exception: pass
 
 def read_image(path: str, no_BGR_correction=False, resz=None):  # -> np.ndarray
     """Returns an image from a path as a numpy array, resizes it if necessary
@@ -69,16 +64,33 @@ def read_image(path: str, no_BGR_correction=False, resz=None):  # -> np.ndarray
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return image
 
-def show_image(image: np.ndarray, BGR2RGB=False):
+def show_image(img, BGR2RGB=False, specify_tkinter_backend=False, use_cv2=False):
     """Displays an image using Matplotlib's pyplot.imshow()
     
     Args:
         image: The image to be displayed.
         BGR2RGB: When True, the color space is converted from BGR to RGB.
+        specify_tkinter_backen: may solve matplotlib related backend problems when set to True
     """
-    if BGR2RGB: image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    plt.imshow(image)
+    if specify_tkinter_backend:
+        import tkinter
+        import matplotlib
+        matplotlib.use('TkAgg')
+    
+    if BGR2RGB: img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    if use_cv2:
+        cv2.imshow("Pluto show_image", img)
+        cv2.waitKey()
+        return
+    
+    plt.imshow(img)
     plt.show()
+
+def write_image(path, img):
+    """wrapper for matplotlib's imsave method
+    """
+    plt.imsave(path, img)
 
 def grab_clipboard():
     from PIL import ImageGrab
@@ -257,6 +269,49 @@ def expand_to_rows(image: np.ndarray, full=False, value=200, bigger_than=True): 
                 image[i] = black_row
         return image
 
+def expand_to_rows_speed(image: np.ndarray, full=False, value=200, bigger_than=True):  # -> np.ndarray
+    """If one value in a row (of a mask, for example) is above a specific threshold, the whole row is expanded to a specific value.
+    
+    Args:
+        image: An grayscale image as np.ndarray.
+    
+    Returns:
+        A np.ndarray of the edited image.
+    """
+    dimensions = image.shape
+    imglen = dimensions[0]
+    
+    t1 = time.time()
+    white_row = np.array([255 for k in range(dimensions[1])])
+    black_row = np.array([0 for k in range(dimensions[1])])
+    t2 = time.time()
+    # print("exptr: create np array:", t2 - t1)
+    
+    t1 = time.time()
+    if not full: imglen = dimensions[0] / 2
+    if bigger_than:
+        for i in range(int(imglen)):
+            for j in range(0, dimensions[1], 2):
+                if image[i][j] > value:
+                    image[i] = white_row
+    else:
+        for i in range(int(imglen)):
+            for j in range(0, dimensions[1], 2):
+                if image[i][j] < value:
+                    image[i] = black_row
+    t2 = time.time()
+    # print("exptr: loop complex:", t2 - t1)
+    t1 = time.time()
+    for i in range(int(imglen), dimensions[0]):
+        for j in range(dimensions[1]):
+            image[i] = black_row
+    t2 = time.time()
+    # print("exptr: end:", t2 - t1)
+    return image
+
+def determine_device(): # -> Literal["cuda", "cpu"]
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
 def google(query: str):
         """Googles a query. Opens result in browser window.
         """
@@ -289,7 +344,6 @@ def deprecated(func):
 class PlutoObject:
     def __init__(self, img: np.ndarray):
         self.img = img
-        self.use_easyocr = False
 
     def load_model(self, path, model, device: Literal["cuda", "cpu"]):
         """Loads the state dictionary and applies it to the model
@@ -361,6 +415,48 @@ class PlutoObject:
 
     def from_tensor(self, tensor, img_size, dtype=np.uint8):
         return tensor.cpu().numpy().reshape(img_size, img_size).astype(dtype)
+    
+    def visualize_detection_result(self, img: np.array, result: np.array, one_class_only=None, color=[255, 0, 0]): # -> np.array
+        """Visualize result of a yolo detection model
+        """
+        for r in result:
+            if one_class_only is not None:
+                if r[5] != one_class_only: continue
+            cv2.rectangle(img, (int(r[0]), int(r[1])), (int(r[2]), int(r[3])), color, 2)
+        
+        return np.array(img)
+    
+    def detection_result_to_numpy(self, detection_result):
+        """Converts a detections result to a NumPy Array.
+        
+        Args:
+            detection_result: raw yolo output
+        
+        Returns:
+            NumPy Array of results
+        """
+        return np.array([elem.cpu().numpy().tolist() for elem in detection_result.xyxy][0])
+    
+    def remove_overlapping_detections(self, detections: list):
+        """If detections are overlapping (only y-axis wise), all smaller detections are removed
+        from the detections array.
+        """        
+        detections.sort(key=lambda elem: elem[3] - elem[1], reverse=True)
+        
+        start = 0
+        while start < len(detections):
+            current = start + 1
+            while current < len(detections):
+                s_row = detections[start]
+                c_row = detections[current]
+                
+                if s_row[1] < c_row[1] and s_row[3] > c_row[3]:
+                    detections.pop(current)
+                else:
+                    current += 1
+            start += 1
+        
+        return detections
 
     def ocr(self, image=None, switch_to_tesseract=False):  # -> str
         """Preforms OCR on a given image, using EasyOCR
@@ -512,8 +608,6 @@ class PlutoObject:
         
         extr = self.expand_to_rows(mask)
         
-        # show_image(extr)
-        
         out = []
         invout = []
         for i in range(len(extr)):
@@ -566,136 +660,73 @@ class PlutoObject:
 
         return out
 
-class FoxNews(PlutoObject):
-    def __init__(self, img: np.ndarray):
-        super().__init__(img)
-    
-    def analyse(self, display=False):
-        """Extracts key information from a screenshot of a Fox News Article.
+class Detectors:
+    def __init__(self, *args):
+        """Stores loaded detection models.
         
         Args:
-            display: True if in between steps should be shown
+            Name of detection model to load
+        """
+        self.detector_models = {}
+        
+        self.load(args)
+    
+    def __repr__(self):
+        out = []
+        out.append("--- Detector ---")
+        out.append("models loaded:")
+        
+        if len(self.detector_models) > 0:
+            for key in self.detector_models.keys():
+                out.append(f"  -> {str(key)} - {str(type(self.detector_models[key]))}")
+        else:
+            out.append("  [none]")
+        
+        return "\n".join(out)
+    
+    def return_model(self, model_name):
+        """Returns a loaded detection model. Will load first if not done yet.
+        """
+        if not model_name in self.detector_models.keys():
+            self._load_model(model_name)
+        
+        return self.detector_models[model_name]
+    
+    def load(self, *args, **kwargs):
+        for a in args:
+            if a == "" or a == (): continue
+            self._load_model(a)
+    
+    def _load_model(self, model_name, force_reload=False):
+        if model_name in self.detector_models.keys() and not force_reload:
+            return
+        
+        self.detector_models[model_name] = self._load_detection_model(
+            weights_path=f"models/{model_name}.pt",
+            force_reload=force_reload)
+    
+    def _load_detection_model(self, weights_path: str, force_reload=False, local_path=None):
+        """Loads a YOLOv5-slim object detection model with custom weigths using PyTorch Hub.
+        
+        Args:
+            weights_path: Path to .pt file with model weigths, can be relative or absolute
+            force_reload: Force reload of model -> no loading from cache.
+            local_path: Optional. For loading model from a local directory. If empty, the model will be loaded from GitHub
         
         Returns:
-            The extracted information as JSON
+            The YOLOv5-slim model class
+        
+        Example:
+            load_detection_model(weights_path="v1.0/text_row3.pt", force_reload=False, local_path="/Users/examplusr/Models/yolov5-slim")
         """
-        og_shape = self.img.shape
-        img = cv2.resize(self.img, (512, 512))
-        black = np.zeros((512, 512))
-
-        for i in range(len(black)):
-            for j in range(len(black[0])):
-                temp = img[i][j]
-                if (temp == [34, 34, 34]).all(): black[i][j] = 255
-        blured = cv2.blur(black, (20, 20))
-
-        for i in range(len(blured)):
-            for j in range(len(blured[0])):
-                if blured[i][j] < 40: blured[i][j] = 0
-                else: blured[i][j] = 255
-
-        msk = self.expand_to_rows(blured)
-
-        og_size_msk = cv2.resize(msk, (og_shape[1], og_shape[0]))
+        source = "github"
+        path = "patzold/yolov5-slim"
         
-        top = []
-        heading = []
-        bottom = []
-
-        top_part = True
-        bottom_part = False
-
-        for i in range(len(self.img)):
-            if og_size_msk[i][0] > 1:
-                heading.append(self.img[i])
-                if top_part:
-                    top_part = False
-                    bottom_part = True
-            elif top_part: top.append(self.img[i])
-            else: bottom.append(self.img[i])
-
-        heading = np.array(heading)
-        bottom = np.array(bottom)
-        top = np.array(top)
+        if local_path:
+            source = "local"
+            path = local_path
         
-        if display:
-            show_image(heading)
-            show_image(bottom)
-            show_image(top)
-
-        ocr_result = self.ocr(heading)
-        headline = self.ocr_cleanup(ocr_result)
-
-        cat_info_img = []
-        top_len = len(top)
-        for i in range(top_len, 0, -1):
-            if top[i-1][0][0] > 250: cat_info_img.insert(0, top[i-1])
-            else: break
-
-        cat_info_img = np.array(cat_info_img)
-        if display: show_image(cat_info_img)
-
-        ocr_result = self.ocr(cat_info_img)
-        clean_ocr = self.ocr_cleanup(ocr_result)
-
-        dotsplit = clean_ocr.split("-")[0][:-1].lstrip(" ")
-        pubsplit = clean_ocr.split("Published")[1].lstrip(" ")
-        
-        subinfo_bottom = []
-
-        stoper = False
-        for row in bottom:
-            subinfo_bottom.append(row)
-            for pix in row:
-                if pix[0] > 200 and pix[0] < 240 and pix[2] < 50 and pix[1] < 50:
-                    stoper = True
-                    break
-            if stoper: break
-
-        subinfo_bottom = np.array(subinfo_bottom[:-3])
-        if display: show_image(subinfo_bottom)
-        subinfo = self.ocr_cleanup(self.ocr(subinfo_bottom))
-
-        subsplit = subinfo.split()
-
-        author_list = []
-        subtitle_list = []
-        subinfo_switcher = True
-
-        for w in reversed(subsplit):
-            if w == "By" and subinfo_switcher:
-                subinfo_switcher = False
-                continue
-            if w == "News" or w == "Fox" or w == "|": continue
-            if subinfo_switcher: author_list.insert(0, w)
-            else: subtitle_list.insert(0, w)
-
-        author = " ".join(author_list)
-        subtitle = " ".join(subtitle_list)
-        
-        return pubsplit, headline, subtitle, author, dotsplit
-    
-    def to_json(self, img=None, path=None):
-        if img is None: img = self.img.copy()
-        import json
-        pubsplit, headline, subtitle, author, dotsplit = self.analyse(img)
-        
-        jasoon = {  "source": "News Article",
-                    "article": {
-                        "created": "[Published] " + pubsplit,
-                        "organisation": "Fox News",
-                        "headline": headline,
-                        "subtitle": subtitle,
-                        "author": author,
-                        "category": dotsplit
-                    }
-                }
-        
-        if path == None: return json.dumps(jasoon)
-        else:
-            out = open(path, "w")
-            json.dump(jasoon, out, indent=6)
-            out.close()
+        return hub.load(path, "custom", path=weights_path, source=source, verbose=False)
 
 class Facebook(PlutoObject):
     def __init__(self, img: np.ndarray):
@@ -704,50 +735,6 @@ class Facebook(PlutoObject):
         self.text = None
         self.insert = None
         self.engagement = None
-    
-    def analyse_legacy(self, img=None):
-        """---
-        Depricated
-        ---
-        """
-        if img is None: img = self.img
-        
-        slc, indx = self.slices(img.copy())
-        
-        image, eng = self.img_eng(indx, img.copy())
-        
-        inpts, imgs = self.part(img[:indx].copy(), slc)
-        
-        header = []
-        text = []
-        
-        for indx in range(len(inpts)):
-            sl = imgs[indx]
-            t = np.transpose((255 - to_grayscale(sl)), (1, 0))
-            t = expand_to_rows(t, True, 10)
-            # show_image(sl)
-            # show_image(t)
-            continue
-            clss = self.classify(inpts[indx])
-            prt = (imgs[indx]).tolist()
-            if clss == 0: header += prt
-            else: text += prt
-        
-        header = np.array(header, np.uint8)
-        date = header[int(header.shape[0] / 2) :]
-        header = header[: int(header.shape[0] / 2)]
-        text = np.array(text, np.uint8)
-        
-        # show_image(header)
-        # show_image(date)
-        # show_image(text)
-        
-        header = self.ocr_cleanup(self.ocr(header))
-        date = self.ocr_cleanup(self.ocr(date))
-        text = self.ocr_cleanup(self.ocr(text))
-        engagement = self.ocr(eng)
-        
-        return header, date, text, engagement
     
     def analyse(self, img=None):
         """Main method for extraction information from the image
@@ -827,10 +814,6 @@ class Facebook(PlutoObject):
             temp[ts[0]:] = insert
             top = temp
             insert = None
-        
-        # show_image(top)
-        # show_image(insert)
-        # show_image(engagement)
         
         return top, insert, engagement
 
@@ -960,7 +943,7 @@ class Facebook(PlutoObject):
         img = to_grayscale(img)
         
         net = ConvNet(1, 6, 12, 100, 20, 2)
-        net.load_state_dict(torch.load("models/general_1.pt"))
+        net.load_state_dict(torch.load("Utility Models/general_1.pt"))
         
         device = self.determine_device()
         net.to(device)
@@ -987,7 +970,7 @@ class Facebook(PlutoObject):
         show_image(result)
         
         result = cv2.resize(result, (img.shape[1], img.shape[0]))
-        print(result.shape, img.shape)
+        # print(result.shape, img.shape)
         
         out = []
         for i in range(len(result)):
@@ -1207,33 +1190,287 @@ class Facebook(PlutoObject):
         return out, vis
 
 class Twitter(PlutoObject):
-    def __init__(self, img: np.ndarray):
-        super().__init__(img)
-        self.header_info = None
-        self.profile_pic = None
-        self.bottom = None
+    def __init__(self, screenshot: np.ndarray, detectors=None):
+        super().__init__(screenshot)
+        
+        self.screenshot = screenshot
+        if screenshot is not None:
+            self.visualization = self.screenshot.copy()
+        else:
+            self.visualization = None
+        self.detectors = detectors
+        
+        if self.detectors is None:
+            self.detectors = Detectors()
+        
+        self.detectors.load("profile_pic", "text_row", "words")
+        
+        self.detections = {}
+        self.data = {}
+        
+        self.data["source"] = "Twitter"
+        self.data["category"] = "Social Media"
+        self.data["tweet"] = {}
+        
+        self._profile_lower_indx = 0
     
-    def analyse(self, img=None):
+    def load_detection_model(self, weights_path: str, force_reload=False, local_path=None):
+        """Loads a YOLOv5-slim object detection model with custom weigths using PyTorch Hub.
+        
+        Args:
+            weights_path: Path to .pt file with model weigths, can be relative or absolute
+            force_reload: Force reload of model -> no loading from cache.
+            local_path: Optional. For loading model from a local directory. If empty, the model will be loaded from GitHub
+        
+        Returns:
+            The YOLOv5-slim model class
+        
+        Example:
+            load_detection_model(weights_path="models/text_row.pt", force_reload=False, local_path="/Users/examplusr/Models/yolov5-slim")
+        """
+        source = "github"
+        path = "patzold/yolov5-slim"
+        
+        if local_path:
+            source = "local"
+            path = local_path
+        
+        return torch.hub.load(path, "custom", path=weights_path, source=source)
+    
+    def get_profile(self, screenshot=None):
+        """Extracts profile information from a Twitter screenshot
+        
+        Args:
+            screenshot: screenshot to use instead of internal one [optional]
+        
+        Returns:
+            handle, username
+        """
+        if screenshot is None: screenshot = self.screenshot
+        
+        profile_pic_detection = self.detectors.return_model("profile_pic")
+        
+        result = profile_pic_detection(screenshot)
+        result = self.detection_result_to_numpy(result)
+        self.detections["profile_pic"] = result
+        
+        self.visualize_detection_result(self.visualization, result)
+        
+        # print(f"Twitter | Profile Pic Detection - detections: {len(result)}")
+        
+        if len(result) < 1:
+            print(f"Twitter | WARNING: Profile Pic Detection has less than one detection!")
+            return None
+        
+        profile_upper_indx = int(np.min(result[:, 1])) # if there are multiple detections, use the min
+        profile_lower_indx = int(np.max(result[:, 3])) # and max index for upper and lower bounds
+        self._profile_lower_indx = profile_lower_indx
+        
+        profile_img = screenshot[profile_upper_indx : profile_lower_indx]
+        
+        # self.show_image(profile_img)
+        
+        # remove the profile image for clean ocr results
+        img_detection = self.detectors.return_model("img_detct")
+        result = img_detection(profile_img)
+        result = self.detection_result_to_numpy(result)
+        self.detections["profile_pic_img"] = result
+        
+        if len(result) < 1:
+            print(f"Twitter | WARNING: Image Detection of the profile row has less than one detection!")
+        
+        profile_left_indx = int(np.max(result[:, 2]))
+        
+        profile_img = profile_img[:, profile_left_indx : int(profile_img.shape[1]*0.9)]
+        
+        # perform ocr & split into handle and username
+        text = self.ocr(profile_img)
+        text = self.ocr_cleanup(text)
+
+        text = text.split("@")
+        
+        handle = str(text[-1])
+        username = "".join(text[:-1])
+        
+        # print(handle)
+        # print(username)
+        # self.show_image(profile_img)
+        
+        self.data["tweet"]["user"] = {}
+        self.data["tweet"]["user"]["handle"] = handle
+        self.data["tweet"]["user"]["username"] = username
+        
+        return handle, username
+    
+    def contains_image(self, excert: np.array): # -> np.array
+        """
+        """
+        image_detection = self.detectors.return_model("img_detct")
+        result = image_detection(excert)
+        result = self.detection_result_to_numpy(result)
+        result = self.remove_overlapping_detections(result.tolist())
+        
+        vis = self.visualize_detection_result(excert, np.array(result))
+        return vis
+    
+    def process_text_rows(self, img):
+        """
+        """
+        # search for text rows
+        text_row_detection = self.detectors.return_model("text_row")
+        
+        result = text_row_detection(img)
+        result = self.detection_result_to_numpy(result)
+        
+        # sort rows in correct order (top -> bottom)
+        result = result.tolist()
+        result.sort(key=lambda elem: elem[1])
+        result = np.array(result)
+        
+        self.detections["text_row"] = result
+        
+        # find out what color words in each text row have
+        word_detection = self.detectors.return_model("words")
+        
+        text_row_word_color = []
+        
+        for r in result:
+            words_result = word_detection(img[int(r[1]) : int(r[3])])
+            words_result = self.detection_result_to_numpy(words_result)
+            
+            text_row_word_color.append([r, words_result])
+        
+        self.detections["text_row_word_color"] = text_row_word_color
+        return text_row_word_color
+    
+    def find_rows_w_color(self, text_row_word_color, color_class, img=None):
+        """Find all rows from text_row_word_color that have a word with color_class
+        
+        color classes:
+        0 -> white
+        1 -> gray
+        2 -> blue
+        """
+        out = []
+        
+        for row in text_row_word_color:
+            if len(row) != 2 or len(row[1]) == 0: continue
+            
+            if 1 in row[1][:, 5]:
+                out.append(row[0])
+                if img is not None:
+                    cv2.rectangle(img, (int(row[0][0]), int(row[0][1])),
+                                (int(row[0][2]), int(row[0][3])), [255, 0, 0], 2)
+        
+        if img is not None:
+            return out, np.array(img)
+        
+        return out
+
+    def get_content(self, screenshot=None, force_redetection=False):
+        """Extracts the content (Tweet text itself) from a screenshot
+        """
+        if screenshot is None: screenshot = self.screenshot
+        
+        # find out where the profile row ends
+        if force_redetection or not "profile_pic" in self.detections.keys():
+            profile_pic_detection = self.detectors.return_model("profile_pic")
+            result = profile_pic_detection(screenshot)
+            result = self.detection_result_to_numpy(result)
+            self.detections["profile_pic"] = result
+        
+        result = self.detections["profile_pic"]
+        
+        profile_lower_indx = int(np.max(result[:, 3])) + 1
+        self.detections["profile_lower_indx"] = profile_lower_indx
+        screenshot = screenshot[profile_lower_indx:]
+        self._screenshot_w_o_profile = screenshot
+        vis_copy = self._screenshot_w_o_profile.copy()
+        
+        # self.contains_image(screenshot)
+        
+        # the content only includes rows with white or blue words, no gray
+        text_row_word_color = self.process_text_rows(screenshot)
+        gray_rows = self.find_rows_w_color(text_row_word_color, 1)
+        gray_rows = np.array(self.remove_overlapping_detections(gray_rows))
+        self.visualize_detection_result(vis_copy, gray_rows, color=[0, 255, 0])
+        self.detections["gray_rows"] = gray_rows
+        # print(gray_rows)
+        
+        first_gray_row_indx = np.min(gray_rows[:, 1])
+        # print(first_gray_row_indx, len(vis_copy))
+        
+        cv2.rectangle(vis_copy, (1, 5), (len(vis_copy[0])-1, int(first_gray_row_indx)-5), [0, 150, 255], 2)
+        self.visualization[profile_lower_indx:] = vis_copy
+        
+        # perform ocr
+        text = self.ocr(screenshot[:int(first_gray_row_indx)])
+        text = self.ocr_cleanup(text)
+        
+        self.data["tweet"]["text"] = text
+        return text
+    
+    def get_engagement(self, screenshot, force_redetection=False):
+        """Extracts the engagement from a screenshot
+        
+        Args:
+            screenshot: Twitter screenshot
+        """
+        if screenshot is None: screenshot = self.screenshot
+        
+        screenshot = screenshot[self._profile_lower_indx:]
+        
+        # get gray rows (potential engagement rows)
+        if force_redetection or "gray_rows" not in self.detections.keys():
+            text_row_word_color = self.process_text_rows(screenshot)
+            gray_rows = self.find_rows_w_color(text_row_word_color, 1)
+            gray_rows = np.array(self.remove_overlapping_detections(gray_rows))
+            self.detections["gray_rows"] = gray_rows
+        
+        gray_rows = self.detections["gray_rows"]
+        
+        self.data["tweet"]["engagement"] = {}
+        
+        # we mainly work with strings to find engagement rows
+        # perform ocr
+        for r in gray_rows:
+            excert = screenshot[int(r[1]) : int(r[3])]
+            ocr_txt = self.ocr(excert)
+            ocr_txt = self.ocr_cleanup(ocr_txt).lower()
+            
+            words = ocr_txt.split(" ")
+            # print(words)
+            
+            if "likes" in words:
+                txt_indx = words.index("likes")
+                if txt_indx < 1: continue
+                self.data["tweet"]["engagement"]["likes"] = words[txt_indx-1]
+            
+            if "retweets" in words:
+                txt_indx = words.index("retweets")
+                if txt_indx < 1: continue
+                self.data["tweet"]["engagement"]["retweets"] = words[txt_indx-1]
+            
+            if "quote" in words:
+                txt_indx = words.index("quote")
+                if txt_indx < 1: continue
+                self.data["tweet"]["engagement"]["quoted"] = words[txt_indx-1]
+    
+    def analyse(self, screenshot=None):
         """Main method for extraction information from the image
         """
-        if img is None: img = self.img
+        if screenshot is not None:
+            self.screenshot = screenshot
+            self.visualization = screenshot.copy()
         
-        rows = self.slice(img)
-        assigned = self.assign(rows)
-        top, self.bottom = assigned[0], assigned[1:]
+        self.data["tweet"] = {}
+        self.detections = {}
         
-        self.profile_pic, self.header_info = self.header_cleanup(rows[0])
+        self.get_profile(self.screenshot)
+        self.get_content(self.screenshot)
+        self.get_engagement(self.screenshot)
         
-        if self.bottom is not None:
-            content = [self.ocr_cleanup(self.ocr(rows[t][0])) for t in range(1, len(rows)-1)]
-        else:
-            content = [self.ocr_cleanup(self.ocr(rows[t][0])) for t in range(1, len(rows))]
-        
-        content = " ".join(content)
-        
-        username, handle, postdate, client = self.extract(self.header_info, self.bottom)
-        
-        return username, handle, content, postdate, client
+        return self.data
     
     def slice(self, img=None):
         """slices the screenshot into multiple rows with different content
@@ -1360,309 +1597,11 @@ class Twitter(PlutoObject):
         import json
         result = self.analyse(img)
         
-        jasoon = {  "source": "Twitter",
-                    "category": "Social Media",
-                    "post": {
-                        "username": result[0],
-                        "handle": result[1],
-                        "content": result[2],
-                        "date": result[3],
-                        "client": result[4],
-                    }
-                }
-        
-        if path == None: return json.dumps(jasoon)
+        if path == None: return json.dumps(result)
         else:
             out = open(path, "w")
-            json.dump(jasoon, out, indent=6)
+            json.dump(result, out, indent=6)
             out.close()
-    
-    @deprecated
-    def split(self, img=None, display=False):
-        img_og = img
-        if img is None: img_og = self.img
-        img_size = 256
-        img = cv2.resize(img_og.copy(), (img_size, img_size))
-        img_tensor = self.to_tensor(img, img_size, torch.float32, self.DEVICE)
-        
-        model = UNET(in_channels=3, out_channels=1)
-        model = self.load_model(model, "D:/Codeing/Twitter_Segmentation/pytorch version/own_2_net_2.pt", self.DEVICE)
-        
-        with torch.no_grad():
-            model_out = torch.sigmoid(model(img_tensor)) * 255
-        
-        mask = self.from_tensor(model_out, img_size)
-        if display: show_image(mask)
-        img = (img.reshape(img_size, img_size, 3) * 255).astype(np.uint8)
-        mask = cv2.merge((mask, mask, mask))
-        mask = trimm_and_blur(mask, False, 60, (30, 30), [0, 0, 0])[:,:,0]
-        if display: show_image(mask)
-        self.vis_model_prediction(img, mask, False)
-        mask = expand_to_rows(mask, value=30)
-        img = img_og
-        mask = cv2.resize(mask[:,:10], (10, img.shape[0]))
-        
-        header = []
-        bottom = []
-
-        # split in header / bottom
-        for i in range(len(mask[:,0])):#range(len(mask[:,0])-1, 0, -1):
-            if mask[i][0] > 250: header.append(img[i,:])
-            else: bottom.append(img[i,:])
-
-        self.header = np.array(header)
-        self.bottom = np.array(bottom)
-
-        if display:
-            show_image(self.header)
-            show_image(self.bottom)
-        
-        return self.header.copy(), self.bottom.copy()
-    
-    def header_color_mode(self, img=None):
-        """Determines whether the header is in dark mode
-        
-        Args:
-            img: if the image should be different to self.header, pass it here
-        
-        Returns:
-            True if the header is in dark mode.
-        """
-        if img is not None: self.header = img
-        dim = self.header.shape
-        img = self.header[:,int(dim[1]/2):,:]
-        avg = np.average(img)
-        return avg < 150
-    
-    @deprecated
-    def header_analyse(self, img=None, display=False):
-        if img is None: img = self.header.copy()
-        
-        img = (img[::-1]).transpose(1, 0, 2)
-        img_og = img.copy()
-        
-        if not self.dark_mode(img): img = trimm_and_blur(img, False, 30, (20, 20), [255, 255, 255], True, [0, 0, 0])
-        else: img = trimm_and_blur(img, True, 245, (20, 20), [255, 255, 255], True, [0, 0, 0])
-        if display: show_image(img)
-        img = expand_to_rows(img[:,:,0], True, 5)
-        
-        out = []
-        c = 0
-        for i in range(len(img)-1, 0, -1):
-            if img[i][0] > 100:
-                out.append(img_og[i])
-                if c == 0: c += 1
-            elif c == 1: break
-        
-        out = np.flip((np.array(out).transpose(1, 0, 2)), (0, 1))
-        
-        if display:
-            show_image(img)
-            show_image(out)
-        
-        ocr_result = self.ocr_cleanup(self.ocr(out))
-        usersplit = ocr_result.split("@")
-        
-        return usersplit[0][:-1], usersplit[1]
-    
-    @deprecated
-    def body_analyse(self, img=None, display=False): # --> str
-        if img is None: img = self.bottom.copy()
-        img_og = img.copy()
-        
-        if not self.dark_mode(img): img = trimm_and_blur(img, False, 30, (20, 20), [255, 255, 255], True, [0, 0, 0])
-        else: img = trimm_and_blur(img, True, 245, (20, 20), [255, 255, 255], True, [0, 0, 0])
-        if display: show_image(img)
-        exptr = expand_to_rows(img[:,:,0], True, 20)[:,:10]
-        if display: show_image(exptr)
-        
-        out = []
-        
-        for i in range(len(exptr)):
-            if exptr[i][0] > 100: out.append(img_og[i])
-        out = np.array(out)
-        
-        if display: show_image(out)
-        
-        return self.ocr_cleanup(self.ocr(out))
-    
-    @deprecated
-    def analyse_light(self, img=None):
-        if img is None: img = self.img
-        
-        self.split()
-        
-        head_info = self.header_analyse()
-        body_info = self.body_analyse()
-
-        jasoon = {  "source": "Twitter",
-                    "tweet": {
-                        # "created_at": "[Published] " + pubsplit,
-                        # "client": "Fox News",
-                        "text": body_info,
-                        "user": {
-                            "name": head_info[0],
-                            "handle": head_info[1]
-                        }
-                    }
-                }
-        
-        return jasoon
-    
-    @deprecated
-    def dark_mode(self, img=None):  # -> bool
-        """Checks if the screenshot has dark mode enabled
-        
-        Args:
-            img: if the checked image should be different from the self.img, pass it here
-        
-        Returns:
-            Is the screenshot in dark mode? True / False
-        """
-        testimg = self.img
-        if img is not None: testimg = img.copy()
-        top_row = avg_of_row(testimg, 0, True)
-        bottom_row = avg_of_row(testimg, -1, True)
-        left_collum = avg_of_collum(testimg, 0, True)
-        right_collum = avg_of_collum(testimg, -1, True)
-        final_value = sum([top_row, bottom_row, left_collum, right_collum]) / 4
-        return final_value < 125
-    
-    @deprecated
-    def analyse_light(self):
-        result = None
-        if self.dark_mode(): result = self.dark()
-        else: result = self.std()
-        header, body = result
-        # show_image(header)
-        # show_image(body)
-        return self.ocr_cleanup(self.ocr(header)), self.ocr_cleanup(self.ocr(body))
-    
-    @deprecated
-    def std(self, img=None, display=False):
-        input_img = None
-        if img is not None: input_img = img.copy()
-        else: input_img = self.img.copy()
-        if img is not None: self.img = img.copy()
-        
-        blur = trimm_and_blur(input_img, True, 30, (20, 20), [255, 255, 255])
-        out = trimm_and_blur(blur, False, 250, (5, 5), [0, 0, 0])
-
-        msk_inv = (255 - out[:,:,0])
-
-        out_exptr = self.expand_to_rows(msk_inv, True)
-
-        header_info = []
-        continue_please = True
-        cnt = 0
-        for i in range(len(out_exptr)):
-            if continue_please:
-                if out_exptr[i][0] < 250: continue
-            else:
-                if out_exptr[i][0] < 250: break
-            header_info.append(self.img[i])
-            continue_please = False
-            # print("hey!")
-        cnt = i
-
-        bottom = []
-        lastone = False
-        for i in range(cnt+1, len(out_exptr), 1):
-            if out_exptr[i][0] < 250:
-                if lastone:
-                    bottom.append(self.img[3])
-                    lastone = False
-                continue
-            bottom.append(self.img[i])
-            lastone = True
-        
-        header_info = np.array(header_info)
-        bottom = np.array(bottom)
-        
-        if display:
-            show_image(header_info)
-            show_image(bottom)
-        
-        return header_info, bottom
-    
-    @deprecated
-    def dark(self, img=None, display=False):
-        """Segmentates the input screenshot (dark mode enabled) into header and body.
-        
-        Args:
-            img: if the screenshot should be different from self.img, pass it here.
-            display: True if output should be displayed before return
-        
-        Returns:
-            The two segmentated areas.
-        """
-        input_img = None
-        if img is not None: input_img = img.copy()
-        else: input_img = self.img.copy()
-        if img is not None: self.img = img.copy()
-        
-        blur = trimm_and_blur(input_img, False, 230, (20, 20),[0, 0, 0])
-        out = trimm_and_blur(blur, True, 10, (5, 5),[255, 255, 255])
-
-        msk = out[:,:,0]
-
-        out_exptr = self.expand_to_rows(msk, True)
-
-        header_info = []
-        continue_please = True
-        cnt = 0
-        for i in range(len(out_exptr)):
-            if continue_please < 3:
-                if out_exptr[i][0] < 250:
-                    if continue_please == 1: continue_please += 1
-                    if continue_please == 2: header_info.append(self.img[i])
-                    continue
-            else:
-                if out_exptr[i][0] < 250: break
-            
-            if continue_please == 0: continue_please += 1
-            if continue_please == 2: break
-            header_info.append(self.img[i])
-        cnt = i
-
-        bottom = []
-        lastone = False
-        for i in range(cnt+1, len(out_exptr), 1):
-            if out_exptr[i][0] < 250:
-                if lastone:
-                    bottom.append(self.img[3])
-                    lastone = False
-                continue
-            bottom.append(self.img[i])
-            lastone = True
-        
-        header_info = np.array(header_info)
-        bottom = np.array(bottom)
-        
-        if display:
-            show_image(header_info)
-            show_image(bottom)
-        
-        return header_info, bottom
-    
-    @deprecated
-    def black(self):
-        pass
-    
-    @deprecated
-    def header_segmentation(self, img=None, inverted=False):
-        if img is None: img = self.img
-        
-        output = self.run_segmentation_model("Twitter Models/twitter_header_segmentation.pt", img)
-        self.vis_model_prediction(img, output, True)
-        
-        output, nonheader = self.extr_mask_img(output, img, True)
-        
-        show_image(output)
-        show_image(nonheader)
-        
-        if inverted: return output, nonheader
-        return output
 
 class NYT(PlutoObject):
     def __init__(self, img: np.ndarray):
@@ -1684,7 +1623,7 @@ class NYT(PlutoObject):
         """
         if img is None: img = self.img.copy()
         img_og = img.copy()
-        
+        # print(img.shape)
         img = cv2.resize(img, (255, 255))
         img = trimm_and_blur(img, False, 30, (15, 15), [255, 255, 255], True, [0, 0, 0])
         
@@ -1788,8 +1727,12 @@ class NYT(PlutoObject):
         """
         analyse_img = img
         if analyse_img is None: analyse_img = self.img
+        import time
         
+        t1 = time.time()
         sliced_result = self.slice(analyse_img)
+        t2 = time.time()
+        # print("slice:", t2 - t1)
         top, color_images, bottomnp = None, None, None
         if len(sliced_result) == 1: top = sliced_result[0]
         elif len(sliced_result) == 3: top, color_images, bottomnp = sliced_result
@@ -1809,11 +1752,15 @@ class NYT(PlutoObject):
         # show_image(color_images)
         # show_image(bottom)
         
+        t1 = time.time()
         head, body = self.header(top, True)
+        t2 = time.time()
+        # print("header:", t2 - t1)
         # show_image(head)
         # show_image(body)
         # return head, body
         
+        t1 = time.time()
         self.headline = self.ocr_cleanup(self.ocr(head))
         author = self.author(bottom)
         # print(headline)
@@ -1821,6 +1768,8 @@ class NYT(PlutoObject):
         # print(type(body))
         subt = self.suber(np.array(body))
         subtitle = self.ocr_cleanup(self.ocr(subt))
+        t2 = time.time()
+        print("ocr:", t2 - t1)
         
         return self.headline, subtitle, author
     
@@ -1835,9 +1784,15 @@ class NYT(PlutoObject):
         img_og = img.copy()
         
         # show_image(img[:, :int(len(img[0]) * 0.9)])
-        img = expand_to_rows(to_grayscale(img[:, :int(len(img[0]) * 0.9)]), True, 248, False) # scroll bar removed
+        import time
+        t1 = time.time()
+        img = expand_to_rows_speed(to_grayscale(img[:, :int(len(img[0]) * 0.9)]), True, 248, False) # scroll bar removed
+        t2 = time.time()
+        print("sclice: exptr:", t2 - t1)
         # show_image(img)
+        # quit()
         
+        t1 = time.time()
         slices = []
         for i in range(1, len(img)):
             if img[i][0] > 250 and img[i-1][0] < 5 or \
@@ -1850,20 +1805,49 @@ class NYT(PlutoObject):
         for i in range(1, len(slices)):
             parts.append(img_og[slices[i-1]:slices[i]])
             # show_image(img_og[slices[i-1]:slices[i]])
+        t2 = time.time()
+        print("sclice: appending:", t2 - t1)
         
+        t1 = time.time()
         top = []
         difflen = 0
-        
+        """
         for i in range(len(parts)):
             temp = parts[i]
-            for row in temp:
-                for pix in row:
+            for rindx, row in enumerate(temp):
+                for pindx, pix in enumerate(row):
                     minpix, maxpix = np.min(pix), np.max(pix)
                     difference = maxpix - minpix
                     if difference > 10: difflen += 1
                     if difflen > 50:
-                        if self.classify(temp) == 0: return top, temp, parts[i+1:]
+                        if self.classify(temp) == 0:
+                            t2 = time.time()
+                            print("sclice: end:", t2 - t1)
+                            print("indx:", rindx, pindx, len(temp), len(temp[0]))
+                            return top, temp, parts[i+1:]
             top += temp.tolist()
+            print("none indx:", rindx, pindx, len(temp), len(temp[0]))
+        t2 = time.time()
+        print("sclice: end:", t2 - t1)
+        """
+        
+        for i in range(len(parts)):
+            temp = parts[i]
+            for rindx, row in enumerate(temp):
+                for p in range(0, len(row), 4):
+                    minpix, maxpix = np.min(row[p]), np.max(row[p])
+                    difference = maxpix - minpix
+                    if difference > 10: difflen += 1
+                    if difflen > 50:
+                        if self.classify(temp) == 0:
+                            t2 = time.time()
+                            print("sclice: end:", t2 - t1)
+                            # print("indx:", rindx, p, len(temp), len(temp[0]))
+                            return top, temp, parts[i+1:]
+            top += temp.tolist()
+            # print("none indx:", rindx, p, len(temp), len(temp[0]))
+        t2 = time.time()
+        print("sclice: end:", t2 - t1)
         
         return [top]
     
@@ -1874,7 +1858,7 @@ class NYT(PlutoObject):
         img = to_grayscale(img)
         
         net = ConvNet(1, 6, 12, 100, 20, 2)
-        net.load_state_dict(torch.load("models/general_1.pt"))
+        net.load_state_dict(torch.load("Utility Models/general_1.pt"))
         
         device = self.determine_device()
         net.to(device)
@@ -1896,6 +1880,7 @@ class NYT(PlutoObject):
             top, image, bottom
         """
         if img is None: return None
+        # print(len(img))
         
         img_og = img.copy()
         img = expand_to_rows(to_grayscale(img), True, 80, False)
@@ -1993,12 +1978,6 @@ class NYT(PlutoObject):
         
         webbrowser.open((link + query))
     
-    def nyt_api_query(api_key, query):
-        url = "https://api.nytimes.com/svc/search/v2/articlesearch.json?q={}&api-key={}".format(query, api_key)
-
-        query = requests.get(url)
-        return query.json()
-    
     def open_search(self):
         self.search(self.headline)
 
@@ -2007,7 +1986,7 @@ class Tagesschau(PlutoObject):
         super().__init__(img)
     
     def analyse(self, img=None):
-        """Main method for extraction information from a Tagesschau screenshot
+        """Do Tagesschau
         """
         if img is None: img = self.img
         
@@ -2308,352 +2287,11 @@ class Tagesschau(PlutoObject):
         
         return info, body
 
-class WPost(PlutoObject):
-    def __init__(self, img: np.ndarray):
-        super().__init__(img)
-    
-    def analyse(self, img=None):
-        if img is None: img = self.img
-        
-        category, headline, img_bottom = self.category(img)
-        # show_image(img_bottom)
-        
-        author, body = self.author(img_bottom)
-        # show_image(body)
-        date, body = self.date(body)
-        
-        return category, headline, author, date, body
-    
-    def to_json(self, img=None, path=None):
-        """Extracts information from screenshot and saves it as json file.
-        
-        Args:
-            img: screenshot as np.array
-            path: path to where the json file should be saved
-        """
-        if img is None: img = self.img.copy()
-        import json
-        
-        category, headline, author, date, body = self.analyse(img)
-        
-        jasoon = {  "source": "Washington Post",
-                    "category": "News Article",
-                    "article": {
-                        "created": "[Published] " + date,
-                        "author": author,
-                        "headline": headline,
-                        "body": body,
-                        "category": category
-                    }
-                }
-        
-        if path == None: return json.dumps(jasoon)
-        else:
-            out = open(path, "w")
-            json.dump(jasoon, out, indent=6)
-            out.close()
-    
-    def category(self, img=None, do_ocr=True, display=False):
-        if img is None: img = self.img
-        
-        if display: show_image(img)
-        color, img_top, img_bottom = self.images(img, True)
-        if display:
-            show_image(color)
-            show_image(img_top)
-            show_image(img_bottom)
-        
-        iso_top = iso_grayscale(img_top.copy(), False, 230, True, (10, 10))
-        # show_image(iso_top)
-        iso_expt = expand_to_rows(iso_top[:, :int(iso_top.shape[1] / 3)], True, 20)
-        # show_image(iso_expt)
-        
-        category = []
-        headline = []
-        for i in range(len(iso_expt)):
-            if iso_expt[i][0] > 100: category.append(img_top[i])
-            else: headline.append(img[i])
-        
-        category = np.array(category)
-        headline = np.array(headline)
-        
-        # show_image(category)
-        # show_image(headline)
-        
-        if do_ocr: return self.ocr_cleanup(self.ocr(category)), \
-                        self.ocr_cleanup(self.ocr(headline)), img_bottom
-        return category, headline, img_bottom
-    
-    def author(self, img=None, do_ocr=True, display=False):
-        if img is None: img = self.img
-        
-        iso = iso_grayscale(img, False, 235, True, (10, 10))
-        # show_image(iso)
-        iso = expand_to_rows(iso, True, 10)
-        # show_image(iso)
-        
-        out = []
-        body = []
-        t = None
-        for i in range(len(img)-2, 0, -1):
-            if iso[i+1][0] < 100 and iso[i][0] > 100:
-                body = img[i:]
-                t = i
-            elif iso[i+1][0] > 100 and iso[i][0] < 100: break
-        out = img[i:t]
-        
-        out = np.array(out)
-        body = np.array(body)
-        
-        if display:
-            show_image(out)
-            show_image(body)
-        
-        if do_ocr:
-            ocr_result = self.ocr_cleanup(self.ocr(out))
-            ocr_result = ocr_result[3:].replace(" and", ",")
-            return ocr_result, body
-
-        return out, body
-    
-    def date(self, img=None, do_ocr=True, display=False):
-        if img is None: img = self.img
-        
-        iso = iso_grayscale(img, False, 180, True, (10, 10))
-        # show_image(iso)
-        iso = expand_to_rows(iso, True, 10)
-        # show_image(iso)
-        
-        body = []
-        date = []
-        
-        for i in range(1, len(img), 1):
-            if iso[i][0] < 200 and iso[i-1][0] > 200: break
-        
-        out = img[:i]
-        body = img[i:]
-        
-        if display:
-            show_image(out)
-            show_image(body)
-        
-        if do_ocr: return self.ocr_cleanup(self.ocr(out)), self.ocr_cleanup(self.ocr(body))
-        return out, body
-    
-    def images(self, img=None, non_images=False): # -> np.ndarary | None
-        """Isolates images of an article, based on color (WPost version)
-        
-        Args:
-            img: if the used screenshot should differ from self.img, pass it here
-            non_images: True if all other parts of the screenshot, that aren't partof an image, \
-                        should also be returned seperatly (basicly a inverted return of this method)
-        
-        Returns:
-            An isolated part of the original screenshot, which only contains the headline\
-            (optional an inverted version as well, when non_images is True)
-            If no images can be found, the return is None
-        
-        Please make sure that img is not scaled down and *not* grayscale
-        """
-        if img is None: img = self.img.copy()
-        
-        img_og = img.copy()
-        img = cv2.resize(img, (50, img_og.shape[0]))
-        
-        image = []
-        non_image_top = []
-        non_image_bottom = []
-        
-        j = 0
-        stop = False
-        color_start = False
-        
-        for i in range(len(img)):
-            stop = False
-            while j < len(img[i]) and not stop:
-                pix = img[i][j]
-                minpix, maxpix = np.min(pix), np.max(pix)
-                difference = maxpix - minpix
-                if difference > 0:
-                    image.append(img_og[i])
-                    stop = True
-                
-                j += 1
-            
-            if stop: color_start = True
-            
-            if not stop and non_images:
-                if color_start: non_image_bottom.append(img_og[i])
-                else: non_image_top.append(img_og[i])
-            j = 0
-        
-        image = np.array(image)
-        if non_images:
-            non_image_top = np.array(non_image_top)
-            non_image_bottom = np.array(non_image_bottom)
-
-        if len(image) < 1:
-            image = None
-            print("Pluto WARNING - At least one return from images() is empty.")
-        
-        if non_images: return image, non_image_top, non_image_bottom
-        return image
-
-class Bild(PlutoObject):
-    def __init__(self, img: np.ndarray):
-        super().__init__(img)
-
-class Spiegel(PlutoObject):
-    def __init__(self, img: np.ndarray):
-        super().__init__(img)
-        self.headline = False
-        self.subtitle = False
-    
-    def analyse(self, img=None):
-        if img is None: img = self.img
-        
-        category, header, bottom = self.split()
-        
-        date_img = self.bottom(bottom)
-        
-        headline_img, subtitle_img = self.header_split(header)
-        
-        headline = self.ocr_cleanup(self.ocr(headline_img))
-        subtitle = self.ocr_cleanup(self.ocr(subtitle_img))
-        date = self.ocr_cleanup(self.ocr(date_img))
-        
-        return self.ocr_cleanup(self.ocr(category)), headline, subtitle, date
-    
-    def to_json(self, img=None, path=None):
-        """Extracts information from screenshot and saves it as json file.
-        
-        Args:
-            img: screenshot as np.array
-            path: path to where the json file should be saved
-        """
-        if img is None: img = self.img.copy()
-        import json
-        
-        category, headline, subtitle, date = self.analyse(img)
-        
-        jasoon = {  "source": "Spiegel",
-                    "category": "News Article",
-                    "article": {
-                        "created": "[Published] " + date,
-                        "headline": headline,
-                        "subtitle": subtitle,
-                        "category": category
-                    }
-                }
-        
-        if path == None: return json.dumps(jasoon)
-        else:
-            out = open(path, "w")
-            json.dump(jasoon, out, indent=6)
-            out.close()
-    
-    def split(self, img=None, display=False):
-        if img is None: img = self.img
-        
-        image, img = self.images(img)
-        
-        gray = to_grayscale(img[:, :int(img.shape[1] / 2), :])
-        
-        header = []
-        top_header = []
-        bottom_header = []
-        
-        gray = expand_to_rows(gray, True, 10, False)
-        
-        pntr = 0
-        pntr2 = len(gray)-1
-        while gray[pntr][0] != 0:
-            pntr += 1
-            top_header.append(img[pntr])
-        
-        while gray[pntr2][0] != 0:
-            pntr2 -= 1
-            bottom_header.insert(0, img[pntr2])
-        
-        top_header = np.array(top_header)
-        header = img[pntr:pntr2]
-        bottom_header = np.array(bottom_header)
-        
-        if display:
-            show_image(top_header)
-            show_image(header)
-            show_image(bottom_header)
-        
-        return top_header, header, bottom_header
-    
-    def header_split(self, img=None, display = False):
-        if img is None: img = self.img
-        
-        img_og = img.copy()
-        
-        img = cv2.resize(to_grayscale(img), (600, 600))
-        img = cv2.blur(img, (40, 40))
-        if display: show_image(img)
-        
-        img = expand_to_rows(img, True, 100, False)
-        img = iso_grayscale(img, True, 10, False, (50, 50))
-        if display: show_image(img)
-        
-        for i in range(len(img)-1, 0, -1):
-            if img[i][0] > 5: break
-        
-        headline = img_og[:i+20]
-        subtitle = img_og[i+20:]
-        
-        self.headline = headline
-        self.subtitle = subtitle
-        
-        if display:
-            show_image(headline)
-            show_image(subtitle)
-        
-        return headline, subtitle
-    
-    def images(self, img=None):
-        if img is None: img = self.img
-        
-        image = []
-        non_image = []
-        
-        for i in range(len(img)):
-            pix = img[i][0]
-            if pix[0] > 250 and pix[1] > 250 and pix[2] > 250:
-                non_image.append(img[i])
-            else: image.append(img[i])
-        
-        return np.array(image), np.array(non_image)
-    
-    def bottom(self, img=None):
-        if img is None: img = self.img
-        
-        img_og = img.copy()
-        
-        img = to_grayscale(img)
-        img = expand_to_rows(img, True, 200, False)
-        
-        out = []
-        for i in range(5, len(img)):
-            if img[i][0] == 0: break
-        
-        for j in range(i, len(img)):
-            if img[j][0] == 0:
-                out.append(img_og[j])
-            else: break
-        
-        return np.array(out)
-
 class WELT(PlutoObject):
     def __init__(self, img: np.ndarray):
         super().__init__(img)
     
     def analyse(self, img=None):
-        """Main method to extract information from a screenshot of a 'Welt' article
-        """
         if img is None: img = self.img
         
         cat, slices = self.split(img)
@@ -2688,6 +2326,7 @@ class WELT(PlutoObject):
                         "created": date,
                         "headline": headline,
                         "category": category,
+                        "author": author,
                         "author": author
                     }
                 }
@@ -2704,7 +2343,7 @@ class WELT(PlutoObject):
         img_og = img.copy()
         
         img = to_grayscale(img)
-        # show_image(img)
+        # # show_image(img)
         
         images, img = self.images(img)
         
@@ -2921,7 +2560,7 @@ class Discord(PlutoObject):
 class FBM(PlutoObject):
     def __init__(self, img: np.ndarray):
         super().__init__(img)
-        self.img = None
+        self.img = img
     
     def analyse(self, img=None):
         """Main method for extractiong messages from a FB Messenger chat screenshot
@@ -2980,7 +2619,7 @@ class FBM(PlutoObject):
         if img is None: img = self.img
         
         net = ConvNet(3, 6, 12, 100, 50, 2)
-        net.load_state_dict(torch.load("models/fbm2.pt"))
+        net.load_state_dict(torch.load("FBM models/fbm2.pt"))
         
         device = self.determine_device()
         net.to(device)
@@ -3147,6 +2786,7 @@ class FBM(PlutoObject):
                     "category": "Chat",
                     "messages": msg
                 }
+        print(jasoon)
         
         if path == None: return json.dumps(jasoon)
         else:
@@ -3260,6 +2900,12 @@ if __name__ == "__main__":
             FBM(img).to_json(img, arg_o)
         elif arg_c == "WhatsApp":
             WhatsApp(img).to_json(img, arg_o)
+        elif arg_c == "Discord":
+            Discord(img).to_json(img, arg_o)
+        elif arg_c == "WELT":
+            WELT(img).to_json(img, arg_o)
+        elif arg_c == "WPost":
+            WPost(img).to_json(img, arg_o)
     
     except Exception: pass
 
